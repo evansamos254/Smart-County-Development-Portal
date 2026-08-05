@@ -165,6 +165,8 @@ const priorityStyles: Record<Priority, string> = {
 }
 
 const defaultProjectDraft = {
+  serial_number: '',
+  department: 'Public Works, Roads and Transport',
   name: '',
   description: '',
   status: 'PLANNED' as ProjectStatus,
@@ -175,8 +177,64 @@ const defaultProjectDraft = {
   completion_date: '',
   progress: '0',
   budget: '',
+  contract_sum: '',
+  contract_variation: '',
   actual_cost: '',
+  vote_balance: '',
+  contractor: '',
+  financial_year: 'FY2026/2027',
+  flagship_type: 'non flagship',
+  procurement_type: 'procurable',
+  directorate: 'Roads',
+  source_of_funds: 'GOK',
+  funded_from: 'both',
+  advertisement_date: '',
+  evaluation_date: '',
+  awarding_date: '',
+  site_handover_date: '',
+  expected_start_date: '',
+  sss_date: '',
+  is_carry_over: false,
+  is_emergency: false,
+  remarks: '',
+  ward_hq_project: '',
 }
+
+const projectFilterDefaults = {
+  financial_year: 'ALL',
+  subcounty_id: 'ALL',
+  ward_id: 'ALL',
+  status: 'ALL',
+  directorate: 'ALL',
+  contractor: 'ALL',
+}
+
+const flagshipOptions = [
+  { value: 'non flagship', label: 'Non flagship' },
+  { value: 'flagship', label: 'Flagship' },
+]
+
+const procurementOptions = [
+  { value: 'procurable', label: 'Procurable' },
+  { value: 'non procurable', label: 'Non procurable' },
+]
+
+const directorateOptions = ['Roads', 'Public works', 'Transport & fleet management', 'Energy'].map((value) => ({
+  value,
+  label: value,
+}))
+
+const sourceOfFundsOptions = [
+  'GOK',
+  'Exchequer',
+  'Loans',
+  'Conditional grant',
+  'Donor funds',
+  'Emergency fund',
+  'Own source revenue',
+].map((value) => ({ value, label: value }))
+
+const fundedFromOptions = ['both', 'Ward', 'HQ'].map((value) => ({ value, label: value }))
 
 const defaultCitizenDraft = {
   full_name: '',
@@ -235,6 +293,20 @@ function labelFromCode(value: string) {
 
 function namedById<T extends { id: number; name: string }>(items: T[], id: number) {
   return items.find((item) => item.id === id)?.name ?? 'Unassigned'
+}
+
+function uniqueOptions(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)))
+    .sort((first, second) => first.localeCompare(second))
+    .map((value) => ({ value, label: value }))
+}
+
+function withAllOption(options: { value: string; label: string }[]) {
+  return [{ value: 'ALL', label: 'All' }, ...options]
+}
+
+function yesNo(value: boolean) {
+  return value ? 'Yes' : 'No'
 }
 
 function canViewModule(role: Role, module: ModuleKey) {
@@ -335,18 +407,20 @@ function TextAreaField({
   label,
   value,
   onChange,
+  required = true,
 }: {
   label: string
   value: string
   onChange: (value: string) => void
+  required?: boolean
 }) {
   return (
-    <label className="grid gap-1.5 text-sm font-medium text-zinc-700 md:col-span-2 xl:col-span-3">
+    <label className="grid gap-1.5 text-sm font-medium text-zinc-700 md:col-span-2 xl:col-span-full">
       <span>{label}</span>
       <textarea
         className="min-h-24 rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-950 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
         value={value}
-        required
+        required={required}
         onChange={(event) => onChange(event.target.value)}
       />
     </label>
@@ -610,6 +684,7 @@ function App() {
   const [villageDraft, setVillageDraft] = useState({ name: '', sublocation_id: '1' })
   const [citizenDraft, setCitizenDraft] = useState(defaultCitizenDraft)
   const [projectDraft, setProjectDraft] = useState(defaultProjectDraft)
+  const [projectFilters, setProjectFilters] = useState(projectFilterDefaults)
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(initialData.projects[0]?.id ?? null)
   const [updateDraft, setUpdateDraft] = useState(defaultUpdateDraft)
   const [userDraft, setUserDraft] = useState(defaultUserDraft)
@@ -700,6 +775,10 @@ function App() {
     value: String(ward.id),
     label: ward.name,
   }))
+  const subcountyOptions = data.subcounties.map((subcounty) => ({
+    value: String(subcounty.id),
+    label: subcounty.name,
+  }))
   const villageOptions = data.villages.map((village) => ({
     value: String(village.id),
     label: village.name,
@@ -716,6 +795,9 @@ function App() {
     value: sex,
     label: labelFromCode(sex),
   }))
+  const financialYearFilterOptions = uniqueOptions(data.projects.map((project) => project.financial_year))
+  const directorateFilterOptions = uniqueOptions(data.projects.map((project) => project.directorate))
+  const contractorFilterOptions = uniqueOptions(data.projects.map((project) => project.contractor))
 
   const canManageActiveModule = currentUser
     ? canWriteModule(currentUser.role, activeModule) ||
@@ -973,19 +1055,50 @@ function App() {
       return
     }
 
+    const budget = Number(projectDraft.budget) || 0
+    const contractSum = Number(projectDraft.contract_sum) || 0
+    const contractVariation = Number(projectDraft.contract_variation) || 0
+    const actualCost = Number(projectDraft.actual_cost) || 0
+    const voteBalance = projectDraft.vote_balance.trim() === ''
+      ? Math.max(budget - actualCost, 0)
+      : Number(projectDraft.vote_balance) || 0
+    const sssDate = nullable(projectDraft.sss_date)
+
     try {
       await persistAndRefresh('/projects', {
+        serial_number: nullable(projectDraft.serial_number),
+        department: nullable(projectDraft.department),
         name,
         description: nullable(projectDraft.description),
         status: projectDraft.status,
         priority: projectDraft.priority,
         ward_id: Number(projectDraft.ward_id),
         start_date: nullable(projectDraft.start_date),
-        due_date: nullable(projectDraft.due_date),
+        due_date: nullable(projectDraft.due_date) ?? sssDate,
         completion_date: nullable(projectDraft.completion_date),
         progress: clampProgress(projectDraft.progress),
-        budget: Number(projectDraft.budget) || 0,
-        actual_cost: Number(projectDraft.actual_cost) || 0,
+        budget,
+        contract_sum: contractSum,
+        contract_variation: contractVariation,
+        actual_cost: actualCost,
+        vote_balance: voteBalance,
+        contractor: nullable(projectDraft.contractor),
+        financial_year: nullable(projectDraft.financial_year),
+        flagship_type: nullable(projectDraft.flagship_type),
+        procurement_type: nullable(projectDraft.procurement_type),
+        directorate: nullable(projectDraft.directorate),
+        source_of_funds: nullable(projectDraft.source_of_funds),
+        funded_from: nullable(projectDraft.funded_from),
+        advertisement_date: nullable(projectDraft.advertisement_date),
+        evaluation_date: nullable(projectDraft.evaluation_date),
+        awarding_date: nullable(projectDraft.awarding_date),
+        site_handover_date: nullable(projectDraft.site_handover_date),
+        expected_start_date: nullable(projectDraft.expected_start_date),
+        sss_date: sssDate,
+        is_carry_over: projectDraft.is_carry_over,
+        is_emergency: projectDraft.is_emergency,
+        remarks: nullable(projectDraft.remarks),
+        ward_hq_project: nullable(projectDraft.ward_hq_project),
       })
       setProjectDraft({ ...defaultProjectDraft, ward_id: data.wards[0]?.id.toString() ?? '1' })
     } catch (error) {
@@ -1121,18 +1234,45 @@ function App() {
       search,
     ),
   )
-  const filteredProjects = data.projects.filter((project) =>
-    matchesQuery(
-      [
-        project.name,
-        project.description,
-        project.status,
-        project.priority,
-        namedById(data.wards, project.ward_id),
-      ],
-      search,
-    ),
-  )
+  const filteredProjects = data.projects.filter((project) => {
+    const ward = data.wards.find((item) => item.id === project.ward_id)
+    const subcountyId = ward?.subcounty_id ? String(ward.subcounty_id) : ''
+    const matchesFilters =
+      (projectFilters.financial_year === 'ALL' || project.financial_year === projectFilters.financial_year) &&
+      (projectFilters.subcounty_id === 'ALL' || subcountyId === projectFilters.subcounty_id) &&
+      (projectFilters.ward_id === 'ALL' || String(project.ward_id) === projectFilters.ward_id) &&
+      (projectFilters.status === 'ALL' || project.status === projectFilters.status) &&
+      (projectFilters.directorate === 'ALL' || project.directorate === projectFilters.directorate) &&
+      (projectFilters.contractor === 'ALL' || project.contractor === projectFilters.contractor)
+
+    return (
+      matchesFilters &&
+      matchesQuery(
+        [
+          project.serial_number,
+          project.department,
+          project.name,
+          project.description,
+          project.status,
+          project.priority,
+          namedById(data.subcounties, ward?.subcounty_id ?? 0),
+          namedById(data.wards, project.ward_id),
+          project.contractor,
+          project.financial_year,
+          project.flagship_type,
+          project.procurement_type,
+          project.directorate,
+          project.source_of_funds,
+          project.funded_from,
+          project.remarks,
+          project.ward_hq_project,
+          yesNo(project.is_carry_over),
+          yesNo(project.is_emergency),
+        ],
+        search,
+      )
+    )
+  })
   const filteredUsers = data.users.filter((user) =>
     matchesQuery([user.name, user.email, user.role, user.status], search),
   )
@@ -1517,6 +1657,7 @@ function App() {
     const selectedProject = selectedProjectId
       ? data.projects.find((project) => project.id === selectedProjectId) ?? null
       : null
+    const selectedProjectWard = selectedProject ? data.wards.find((ward) => ward.id === selectedProject.ward_id) : null
     const selectedProjectUpdates = selectedProject
       ? data.projectUpdates
           .filter((update) => update.project_id === selectedProject.id)
@@ -1524,93 +1665,323 @@ function App() {
       : []
     const canCreateProject = canManage('projects')
     const canSubmitProgressUpdate = currentUser ? canWriteProjectUpdates(currentUser.role) : false
+    const selectedProjectDetails = selectedProject
+      ? [
+          { label: 'SNo', value: selectedProject.serial_number || selectedProject.id },
+          { label: 'Department', value: selectedProject.department || 'Not recorded' },
+          { label: 'Sub-county', value: namedById(data.subcounties, selectedProjectWard?.subcounty_id ?? 0) },
+          { label: 'Ward', value: namedById(data.wards, selectedProject.ward_id) },
+          { label: 'Budget Allocation', value: money(selectedProject.budget) },
+          { label: 'Contract Sum', value: money(selectedProject.contract_sum) },
+          { label: 'Contract Variation', value: money(selectedProject.contract_variation) },
+          { label: 'Amount Paid To Date', value: money(selectedProject.actual_cost) },
+          { label: 'Vote Balance', value: money(selectedProject.vote_balance) },
+          { label: 'Contractor', value: selectedProject.contractor || 'Not recorded' },
+          { label: 'Financial Year', value: selectedProject.financial_year || 'Not recorded' },
+          { label: 'Current Status', value: <StatusBadge status={selectedProject.status} /> },
+          { label: 'Flagship/non flagship', value: selectedProject.flagship_type || 'Not recorded' },
+          { label: 'Procurable/Non procurable', value: selectedProject.procurement_type || 'Not recorded' },
+          { label: 'Directorate/SAGA', value: selectedProject.directorate || 'Not recorded' },
+          { label: 'Source of Funds', value: selectedProject.source_of_funds || 'Not recorded' },
+          { label: 'Project Funded From', value: selectedProject.funded_from || 'Not recorded' },
+          { label: 'Advertisement Date', value: selectedProject.advertisement_date || 'Not recorded' },
+          { label: 'Evaluation Date', value: selectedProject.evaluation_date || 'Not recorded' },
+          { label: 'Awarding Date', value: selectedProject.awarding_date || 'Not recorded' },
+          { label: 'Site Hand Over Date', value: selectedProject.site_handover_date || 'Not recorded' },
+          { label: 'Expected Start Date', value: selectedProject.expected_start_date || 'Not recorded' },
+          { label: 'SSS', value: selectedProject.sss_date || 'Not recorded' },
+          { label: 'Actual Start Date', value: selectedProject.start_date || 'Not recorded' },
+          { label: 'Actual Completion Date', value: selectedProject.completion_date || 'Not recorded' },
+          { label: 'Is Project Carry Over', value: yesNo(selectedProject.is_carry_over) },
+          { label: 'Emergency Project', value: yesNo(selectedProject.is_emergency) },
+          { label: 'Ward / HQ Project', value: selectedProject.ward_hq_project || 'Not recorded' },
+          { label: 'Project Description / Scope', value: selectedProject.description || 'Not recorded', wide: true },
+          { label: 'Remarks', value: selectedProject.remarks || 'Not recorded', wide: true },
+        ]
+      : []
 
     return (
       <div className="grid gap-5">
         {canCreateProject ? (
           <Panel icon={Construction} title="Add Project">
-          <form className="grid gap-4 md:grid-cols-2 xl:grid-cols-3" onSubmit={handleAddProject}>
-            <TextField
-              label="Name"
-              value={projectDraft.name}
-              onChange={(value) => setProjectDraft((draft) => ({ ...draft, name: value }))}
+            <form className="grid gap-4 md:grid-cols-2 xl:grid-cols-4" onSubmit={handleAddProject}>
+              <TextField
+                label="SNo"
+                value={projectDraft.serial_number}
+                required={false}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, serial_number: value }))}
+              />
+              <TextField
+                label="Department"
+                value={projectDraft.department}
+                required={false}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, department: value }))}
+              />
+              <TextField
+                label="Financial Year"
+                value={projectDraft.financial_year}
+                required={false}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, financial_year: value }))}
+              />
+              <SelectField
+                label="Ward"
+                value={projectDraft.ward_id}
+                options={wardOptions}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, ward_id: value }))}
+              />
+              <TextField
+                label="Project Name"
+                value={projectDraft.name}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, name: value }))}
+              />
+              <TextField
+                label="Contractor"
+                value={projectDraft.contractor}
+                required={false}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, contractor: value }))}
+              />
+              <SelectField
+                label="Current Status"
+                value={projectDraft.status}
+                options={statusOptions}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, status: value as ProjectStatus }))}
+              />
+              <TextField
+                label="Progress"
+                type="number"
+                value={projectDraft.progress}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, progress: value }))}
+              />
+              <TextField
+                label="Budget Allocation (Kshs.)"
+                type="number"
+                value={projectDraft.budget}
+                required={false}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, budget: value }))}
+              />
+              <TextField
+                label="Contract Sum (Kshs.)"
+                type="number"
+                value={projectDraft.contract_sum}
+                required={false}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, contract_sum: value }))}
+              />
+              <TextField
+                label="Contract Variation (Kshs.)"
+                type="number"
+                value={projectDraft.contract_variation}
+                required={false}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, contract_variation: value }))}
+              />
+              <TextField
+                label="Amount Paid To Date (Kshs.)"
+                type="number"
+                value={projectDraft.actual_cost}
+                required={false}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, actual_cost: value }))}
+              />
+              <TextField
+                label="Vote Balance"
+                type="number"
+                value={projectDraft.vote_balance}
+                required={false}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, vote_balance: value }))}
+              />
+              <SelectField
+                label="Flagship/non flagship"
+                value={projectDraft.flagship_type}
+                options={flagshipOptions}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, flagship_type: value }))}
+              />
+              <SelectField
+                label="Procurable/Non procurable"
+                value={projectDraft.procurement_type}
+                options={procurementOptions}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, procurement_type: value }))}
+              />
+              <SelectField
+                label="Directorate/SAGA"
+                value={projectDraft.directorate}
+                options={directorateOptions}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, directorate: value }))}
+              />
+              <SelectField
+                label="Source of funds"
+                value={projectDraft.source_of_funds}
+                options={sourceOfFundsOptions}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, source_of_funds: value }))}
+              />
+              <SelectField
+                label="Project funded from"
+                value={projectDraft.funded_from}
+                options={fundedFromOptions}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, funded_from: value }))}
+              />
+              <TextField
+                label="Ward / HQ project"
+                value={projectDraft.ward_hq_project}
+                required={false}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, ward_hq_project: value }))}
+              />
+              <SelectField
+                label="Priority"
+                value={projectDraft.priority}
+                options={priorityOptions}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, priority: value as Priority }))}
+              />
+              <TextField
+                label="Advertisement date"
+                type="date"
+                value={projectDraft.advertisement_date}
+                required={false}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, advertisement_date: value }))}
+              />
+              <TextField
+                label="Evaluation date"
+                type="date"
+                value={projectDraft.evaluation_date}
+                required={false}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, evaluation_date: value }))}
+              />
+              <TextField
+                label="Awarding date"
+                type="date"
+                value={projectDraft.awarding_date}
+                required={false}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, awarding_date: value }))}
+              />
+              <TextField
+                label="Site Hand Over date"
+                type="date"
+                value={projectDraft.site_handover_date}
+                required={false}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, site_handover_date: value }))}
+              />
+              <TextField
+                label="Expected Start Date"
+                type="date"
+                value={projectDraft.expected_start_date}
+                required={false}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, expected_start_date: value }))}
+              />
+              <TextField
+                label="SSS"
+                type="date"
+                value={projectDraft.sss_date}
+                required={false}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, sss_date: value }))}
+              />
+              <TextField
+                label="Actual start date"
+                type="date"
+                value={projectDraft.start_date}
+                required={false}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, start_date: value }))}
+              />
+              <TextField
+                label="Actual completion date"
+                type="date"
+                value={projectDraft.completion_date}
+                required={false}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, completion_date: value }))}
+              />
+              <div className="grid gap-3 md:col-span-2 xl:col-span-2">
+                <Toggle
+                  label="Is Project Carry Over"
+                  checked={projectDraft.is_carry_over}
+                  onChange={(checked) => setProjectDraft((draft) => ({ ...draft, is_carry_over: checked }))}
+                />
+                <Toggle
+                  label="Emergency Project"
+                  checked={projectDraft.is_emergency}
+                  onChange={(checked) => setProjectDraft((draft) => ({ ...draft, is_emergency: checked }))}
+                />
+              </div>
+              <TextAreaField
+                label="Project Description / Scope"
+                value={projectDraft.description}
+                required={false}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, description: value }))}
+              />
+              <TextAreaField
+                label="Remarks"
+                value={projectDraft.remarks}
+                required={false}
+                onChange={(value) => setProjectDraft((draft) => ({ ...draft, remarks: value }))}
+              />
+              <div className="md:col-span-2 xl:col-span-full">
+                <SubmitButton label="Add Project" />
+              </div>
+            </form>
+          </Panel>
+        ) : null}
+
+        <Panel icon={Search} title="Project Filters">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+            <SelectField
+              label="Financial Year"
+              value={projectFilters.financial_year}
+              options={withAllOption(financialYearFilterOptions)}
+              onChange={(value) => setProjectFilters((filters) => ({ ...filters, financial_year: value }))}
+            />
+            <SelectField
+              label="Sub-county"
+              value={projectFilters.subcounty_id}
+              options={withAllOption(subcountyOptions)}
+              onChange={(value) => setProjectFilters((filters) => ({ ...filters, subcounty_id: value, ward_id: 'ALL' }))}
             />
             <SelectField
               label="Ward"
-              value={projectDraft.ward_id}
-              options={wardOptions}
-              onChange={(value) => setProjectDraft((draft) => ({ ...draft, ward_id: value }))}
+              value={projectFilters.ward_id}
+              options={withAllOption(
+                projectFilters.subcounty_id === 'ALL'
+                  ? wardOptions
+                  : data.wards
+                      .filter((ward) => String(ward.subcounty_id) === projectFilters.subcounty_id)
+                      .map((ward) => ({ value: String(ward.id), label: ward.name })),
+              )}
+              onChange={(value) => setProjectFilters((filters) => ({ ...filters, ward_id: value }))}
             />
             <SelectField
-              label="Status"
-              value={projectDraft.status}
-              options={statusOptions}
-              onChange={(value) => setProjectDraft((draft) => ({ ...draft, status: value as ProjectStatus }))}
+              label="Current Status"
+              value={projectFilters.status}
+              options={withAllOption(statusOptions)}
+              onChange={(value) => setProjectFilters((filters) => ({ ...filters, status: value }))}
             />
             <SelectField
-              label="Priority"
-              value={projectDraft.priority}
-              options={priorityOptions}
-              onChange={(value) => setProjectDraft((draft) => ({ ...draft, priority: value as Priority }))}
+              label="Directorate/SAGA"
+              value={projectFilters.directorate}
+              options={withAllOption(directorateFilterOptions)}
+              onChange={(value) => setProjectFilters((filters) => ({ ...filters, directorate: value }))}
             />
-            <TextField
-              label="Start Date"
-              type="date"
-              value={projectDraft.start_date}
-              required={false}
-              onChange={(value) => setProjectDraft((draft) => ({ ...draft, start_date: value }))}
+            <SelectField
+              label="Contractor"
+              value={projectFilters.contractor}
+              options={withAllOption(contractorFilterOptions)}
+              onChange={(value) => setProjectFilters((filters) => ({ ...filters, contractor: value }))}
             />
-            <TextField
-              label="Due Date"
-              type="date"
-              value={projectDraft.due_date}
-              required={false}
-              onChange={(value) => setProjectDraft((draft) => ({ ...draft, due_date: value }))}
-            />
-            <TextField
-              label="Completion Date"
-              type="date"
-              value={projectDraft.completion_date}
-              required={false}
-              onChange={(value) => setProjectDraft((draft) => ({ ...draft, completion_date: value }))}
-            />
-            <TextField
-              label="Progress"
-              type="number"
-              value={projectDraft.progress}
-              onChange={(value) => setProjectDraft((draft) => ({ ...draft, progress: value }))}
-            />
-            <TextField
-              label="Budget"
-              type="number"
-              value={projectDraft.budget}
-              required={false}
-              onChange={(value) => setProjectDraft((draft) => ({ ...draft, budget: value }))}
-            />
-            <TextField
-              label="Actual Cost"
-              type="number"
-              value={projectDraft.actual_cost}
-              required={false}
-              onChange={(value) => setProjectDraft((draft) => ({ ...draft, actual_cost: value }))}
-            />
-            <TextAreaField
-              label="Description"
-              value={projectDraft.description}
-              onChange={(value) => setProjectDraft((draft) => ({ ...draft, description: value }))}
-            />
-            <div className="md:col-span-2 xl:col-span-3">
-              <SubmitButton label="Add Project" />
+            <div className="self-end xl:col-span-full">
+              <button
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-700 shadow-sm transition hover:bg-zinc-50"
+                type="button"
+                title="Reset Filters"
+                onClick={() => setProjectFilters(projectFilterDefaults)}
+              >
+                <X className="h-4 w-4" aria-hidden="true" />
+                Reset Filters
+              </button>
             </div>
-          </form>
-          </Panel>
-        ) : null}
+          </div>
+        </Panel>
+
         <DataTable<Project>
           rows={filteredProjects}
           emptyLabel="No projects found"
           columns={[
+            { header: 'SNo', value: (project) => project.serial_number || project.id, className: 'min-w-20' },
+            { header: 'Department', value: (project) => project.department || 'Not recorded', className: 'min-w-56' },
             {
-              header: 'Project',
+              header: 'Project Name',
               value: (project) => (
                 <div>
                   <button
@@ -1625,20 +1996,81 @@ function App() {
                   >
                     {project.name}
                   </button>
-                  <p className="mt-1 max-w-xl text-xs text-zinc-500">{project.description || 'No description'}</p>
                 </div>
               ),
+              className: 'min-w-64',
             },
-            { header: 'Ward', value: (project) => namedById(data.wards, project.ward_id) },
-            { header: 'Status', value: (project) => <StatusBadge status={project.status} /> },
-            { header: 'Priority', value: (project) => <PriorityBadge priority={project.priority} /> },
+            {
+              header: 'Project Description / Scope',
+              value: (project) => <span className="block max-w-xl text-xs text-zinc-600">{project.description || 'Not recorded'}</span>,
+              className: 'min-w-96',
+            },
+            {
+              header: 'Sub-county',
+              value: (project) => {
+                const ward = data.wards.find((item) => item.id === project.ward_id)
+                return namedById(data.subcounties, ward?.subcounty_id ?? 0)
+              },
+              className: 'min-w-36',
+            },
+            { header: 'Ward', value: (project) => namedById(data.wards, project.ward_id), className: 'min-w-40' },
+            { header: 'Budget Allocation', value: (project) => money(project.budget), className: 'min-w-40' },
+            { header: 'Contract Sum', value: (project) => money(project.contract_sum), className: 'min-w-36' },
+            { header: 'Contract Variation', value: (project) => money(project.contract_variation), className: 'min-w-40' },
+            { header: 'Amount Paid To Date', value: (project) => money(project.actual_cost), className: 'min-w-44' },
+            { header: 'Vote Balance', value: (project) => money(project.vote_balance), className: 'min-w-36' },
+            { header: 'Contractor', value: (project) => project.contractor || 'Not recorded', className: 'min-w-48' },
+            { header: 'Financial Year', value: (project) => project.financial_year || 'Not recorded', className: 'min-w-36' },
+            { header: 'Current Status', value: (project) => <StatusBadge status={project.status} />, className: 'min-w-40' },
+            { header: 'Priority', value: (project) => <PriorityBadge priority={project.priority} />, className: 'min-w-32' },
+            { header: 'Flagship/non flagship', value: (project) => project.flagship_type || 'Not recorded', className: 'min-w-44' },
+            {
+              header: 'Procurable/Non procurable',
+              value: (project) => project.procurement_type || 'Not recorded',
+              className: 'min-w-48',
+            },
+            { header: 'Directorate/SAGA', value: (project) => project.directorate || 'Not recorded', className: 'min-w-48' },
+            {
+              header: 'Source of funds',
+              value: (project) => project.source_of_funds || 'Not recorded',
+              className: 'min-w-48',
+            },
+            {
+              header: 'Project funded from',
+              value: (project) => project.funded_from || 'Not recorded',
+              className: 'min-w-40',
+            },
+            { header: 'Advertisement date', value: (project) => project.advertisement_date || 'Not recorded', className: 'min-w-40' },
+            { header: 'Evaluation date', value: (project) => project.evaluation_date || 'Not recorded', className: 'min-w-36' },
+            { header: 'Awarding date', value: (project) => project.awarding_date || 'Not recorded', className: 'min-w-36' },
+            { header: 'Site Hand Over date', value: (project) => project.site_handover_date || 'Not recorded', className: 'min-w-44' },
+            {
+              header: 'Expected Start Date',
+              value: (project) => project.expected_start_date || 'Not recorded',
+              className: 'min-w-44',
+            },
+            { header: 'SSS', value: (project) => project.sss_date || 'Not recorded', className: 'min-w-32' },
+            { header: 'Actual start date', value: (project) => project.start_date || 'Not recorded', className: 'min-w-40' },
+            {
+              header: 'Actual completion date',
+              value: (project) => project.completion_date || 'Not recorded',
+              className: 'min-w-48',
+            },
+            { header: 'Is Project Carry Over', value: (project) => yesNo(project.is_carry_over), className: 'min-w-44' },
+            { header: 'Emergency Project', value: (project) => yesNo(project.is_emergency), className: 'min-w-40' },
+            {
+              header: 'Remarks',
+              value: (project) => <span className="block max-w-lg text-xs text-zinc-600">{project.remarks || 'Not recorded'}</span>,
+              className: 'min-w-80',
+            },
+            { header: 'Ward / HQ project', value: (project) => project.ward_hq_project || 'Not recorded', className: 'min-w-40' },
             {
               header: 'Progress',
               value: (project) => (
                 <div className="min-w-32">
                   <div className="flex justify-between text-xs text-zinc-500">
                     <span>{project.progress}%</span>
-                    <span>{project.due_date || 'No date'}</span>
+                    <span>{project.sss_date || project.due_date || 'No date'}</span>
                   </div>
                   <div className="mt-2 h-2 overflow-hidden rounded-md bg-zinc-100">
                     <div className="h-full rounded-md bg-emerald-600" style={{ width: `${project.progress}%` }} />
@@ -1646,34 +2078,21 @@ function App() {
                 </div>
               ),
             },
-            {
-              header: 'Budget Position',
-              value: (project) => {
-                const utilization = project.budget ? Math.round((project.actual_cost / project.budget) * 100) : 0
-                const cappedUtilization = Math.min(utilization, 100)
-
-                return (
-                  <div className="min-w-44">
-                    <div className="grid gap-1 text-xs text-zinc-500">
-                      <div className="flex justify-between gap-3">
-                        <span>Allocated</span>
-                        <span className="font-semibold text-zinc-950">{money(project.budget)}</span>
-                      </div>
-                      <div className="flex justify-between gap-3">
-                        <span>Actual</span>
-                        <span className="font-semibold text-zinc-950">{money(project.actual_cost)}</span>
-                      </div>
-                    </div>
-                    <div className="mt-2 h-2 overflow-hidden rounded-md bg-zinc-100">
-                      <div className="h-full rounded-md bg-emerald-600" style={{ width: `${cappedUtilization}%` }} />
-                    </div>
-                    <p className="mt-1 text-xs font-semibold text-zinc-500">{utilization}% used</p>
-                  </div>
-                )
-              },
-            },
           ]}
         />
+
+        {selectedProject ? (
+          <Panel icon={WalletCards} title={`${selectedProject.name} Tracking Details`}>
+            <div className="grid gap-x-6 gap-y-4 sm:grid-cols-2 xl:grid-cols-4">
+              {selectedProjectDetails.map((detail) => (
+                <div className={detail.wide ? 'sm:col-span-2 xl:col-span-4' : ''} key={detail.label}>
+                  <p className="text-xs font-semibold uppercase text-zinc-500">{detail.label}</p>
+                  <div className="mt-1 break-words text-sm font-semibold text-zinc-900">{detail.value}</div>
+                </div>
+              ))}
+            </div>
+          </Panel>
+        ) : null}
 
         {selectedProject ? (
           <Panel icon={Gauge} title={`${selectedProject.name} Progress Updates`}>

@@ -122,14 +122,50 @@ export async function updateRecord<T>(path: string, payload: Record<string, unkn
   })
 }
 
+function asDate(value: string | null | undefined) {
+  return value?.slice(0, 10) ?? ''
+}
+
+function asNumber(value: unknown) {
+  const numeric = Number(value ?? 0)
+
+  return Number.isNaN(numeric) ? 0 : numeric
+}
+
+function asBoolean(value: unknown) {
+  return value === true || value === 1 || value === '1'
+}
+
 function mapProject(project: Project): Project {
   return {
     ...project,
-    budget: Number(project.budget),
-    actual_cost: Number(project.actual_cost),
-    start_date: project.start_date?.slice(0, 10) ?? '',
-    due_date: project.due_date?.slice(0, 10) ?? '',
-    completion_date: project.completion_date?.slice(0, 10) ?? '',
+    serial_number: project.serial_number ?? '',
+    department: project.department ?? 'Public Works, Roads and Transport',
+    budget: asNumber(project.budget),
+    contract_sum: asNumber(project.contract_sum),
+    contract_variation: asNumber(project.contract_variation),
+    actual_cost: asNumber(project.actual_cost),
+    vote_balance: asNumber(project.vote_balance),
+    contractor: project.contractor ?? '',
+    financial_year: project.financial_year ?? '',
+    flagship_type: project.flagship_type ?? '',
+    procurement_type: project.procurement_type ?? '',
+    directorate: project.directorate ?? '',
+    source_of_funds: project.source_of_funds ?? '',
+    funded_from: project.funded_from ?? '',
+    start_date: asDate(project.start_date),
+    due_date: asDate(project.due_date),
+    completion_date: asDate(project.completion_date),
+    advertisement_date: asDate(project.advertisement_date),
+    evaluation_date: asDate(project.evaluation_date),
+    awarding_date: asDate(project.awarding_date),
+    site_handover_date: asDate(project.site_handover_date),
+    expected_start_date: asDate(project.expected_start_date),
+    sss_date: asDate(project.sss_date),
+    is_carry_over: asBoolean(project.is_carry_over),
+    is_emergency: asBoolean(project.is_emergency),
+    remarks: project.remarks ?? '',
+    ward_hq_project: project.ward_hq_project ?? '',
   }
 }
 

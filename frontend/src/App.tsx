@@ -11,7 +11,9 @@ import {
   CircleCheck,
   CirclePause,
   CircleSlash,
+  ClipboardList,
   Construction,
+  DollarSign,
   Gauge,
   Home,
   Layers3,
@@ -22,7 +24,9 @@ import {
   MapPinned,
   Menu,
   Megaphone,
+  MessageSquare,
   Plus,
+  Printer,
   Save,
   Search,
   Settings,
@@ -41,10 +45,23 @@ import {
   sexes,
 } from './data'
 import {
+  ChartCard,
+  DashboardTabs,
+  LiveClock,
+  SectorBarChart,
+  StatTile,
+  StatusDonutChart,
+  SubcountyBreakdown,
+  TrendLineChart,
+  sectorPalette,
+} from './components/ProjectsDashboardWidgets'
+import {
   createRecord,
+  loadFeedback,
   loadPortalData,
   markAllNotificationsReadRequest,
   markNotificationReadRequest,
+  submitFeedback,
 } from './api'
 import type {
   Citizen,
@@ -72,6 +89,24 @@ type NavItem = {
   key: ModuleKey
   label: string
   icon: LucideIcon
+}
+
+type ProjectsTabKey =
+  | 'dashboard'
+  | 'projects'
+  | 'location'
+  | 'status'
+  | 'financials'
+  | 'pmc'
+  | 'report'
+  | 'feedback'
+
+type FeedbackEntry = {
+  id: number
+  name: string
+  email: string
+  message: string
+  created_at: string
 }
 
 type Role = PortalUser['role']
@@ -263,6 +298,23 @@ const defaultNotificationDraft = {
   message: '',
   type: 'System' as Notification['type'],
 }
+
+const defaultFeedbackDraft = {
+  name: '',
+  email: '',
+  message: '',
+}
+
+const projectsTabs: { key: ProjectsTabKey; label: string; icon: LucideIcon }[] = [
+  { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { key: 'projects', label: 'Projects', icon: Construction },
+  { key: 'location', label: 'Location', icon: MapPinned },
+  { key: 'status', label: 'Status', icon: Gauge },
+  { key: 'financials', label: 'Financials', icon: DollarSign },
+  { key: 'pmc', label: 'PMC', icon: Users },
+  { key: 'report', label: 'Report', icon: ClipboardList },
+  { key: 'feedback', label: 'Feedback', icon: MessageSquare },
+]
 
 const currencyFormatter = new Intl.NumberFormat('en-KE', {
   style: 'currency',
@@ -684,7 +736,11 @@ function App() {
   const [villageDraft, setVillageDraft] = useState({ name: '', sublocation_id: '1' })
   const [citizenDraft, setCitizenDraft] = useState(defaultCitizenDraft)
   const [projectDraft, setProjectDraft] = useState(defaultProjectDraft)
+  const [showAddProjectForm, setShowAddProjectForm] = useState(false)
   const [projectFilters, setProjectFilters] = useState(projectFilterDefaults)
+  const [projectsTab, setProjectsTab] = useState<ProjectsTabKey>('dashboard')
+  const [feedbackDraft, setFeedbackDraft] = useState(defaultFeedbackDraft)
+  const [feedbackEntries, setFeedbackEntries] = useState<FeedbackEntry[]>([])
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(initialData.projects[0]?.id ?? null)
   const [updateDraft, setUpdateDraft] = useState(defaultUpdateDraft)
   const [userDraft, setUserDraft] = useState(defaultUserDraft)
@@ -692,6 +748,7 @@ function App() {
 
   useEffect(() => {
     void refreshPortalData()
+    void refreshFeedback()
   }, [])
 
   useEffect(() => {
@@ -1207,6 +1264,32 @@ function App() {
     }
   }
 
+  async function refreshFeedback() {
+    try {
+      setFeedbackEntries(await loadFeedback())
+    } catch (error) {
+      reportApiError(error, 'Could not load feedback.')
+    }
+  }
+
+  async function handleAddFeedback(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const name = feedbackDraft.name.trim()
+    const message = feedbackDraft.message.trim()
+
+    if (!name || !message) {
+      return
+    }
+
+    try {
+      await submitFeedback({ name, email: nullable(feedbackDraft.email), message })
+      await refreshFeedback()
+      setFeedbackDraft(defaultFeedbackDraft)
+    } catch (error) {
+      reportApiError(error, 'Could not submit feedback.')
+    }
+  }
+
   async function markAllRead() {
     if (!canManage('notifications')) {
       return
@@ -1700,10 +1783,430 @@ function App() {
         ]
       : []
 
+    const dashboardTotalBudget = filteredProjects.reduce((sum, project) => sum + project.budget, 0)
+    const dashboardCompletedCount = filteredProjects.filter((project) => project.status === 'COMPLETED').length
+    const dashboardOngoingCount = filteredProjects.filter((project) => project.status === 'IN_PROGRESS').length
+
+    const dashboardSectorData = uniqueOptions(filteredProjects.map((project) => project.directorate))
+      .map((option) => ({
+        label: option.label,
+        value: filteredProjects.filter((project) => project.directorate === option.value).length,
+      }))
+      .sort((first, second) => second.value - first.value)
+
+    const dashboardStatusSegments = [
+      {
+        label: 'Completed',
+        color: '#059669',
+        value: filteredProjects.filter((project) => project.status === 'COMPLETED').length,
+      },
+      {
+        label: 'Ongoing',
+        color: '#2563eb',
+        value: filteredProjects.filter((project) => project.status === 'IN_PROGRESS' || project.status === 'PLANNED').length,
+      },
+      {
+        label: 'Stalled',
+        color: '#991b1b',
+        value: filteredProjects.filter((project) => project.status === 'ON_HOLD' || project.status === 'CANCELLED').length,
+      },
+    ]
+
+    const dashboardTrendData = uniqueOptions(filteredProjects.map((project) => project.financial_year))
+      .map((option) => ({
+        label: option.label.replace('FY', ''),
+        value: filteredProjects.filter((project) => project.financial_year === option.value).length,
+      }))
+
+    const dashboardSubcountyRows = (() => {
+      const rows = data.subcounties.map((subcounty, index) => {
+        const subcountyProjects = filteredProjects.filter((project) => {
+          const ward = data.wards.find((item) => item.id === project.ward_id)
+          return ward?.subcounty_id === subcounty.id
+        })
+
+        return {
+          name: subcounty.name,
+          total: subcountyProjects.length,
+          completed: subcountyProjects.filter((project) => project.status === 'COMPLETED').length,
+          ongoing: subcountyProjects.filter((project) => project.status === 'IN_PROGRESS' || project.status === 'PLANNED').length,
+          color: sectorPalette[index % sectorPalette.length],
+        }
+      }).filter((row) => row.total > 0)
+
+      const total = rows.reduce((sum, row) => sum + row.total, 0)
+
+      return rows
+        .map((row) => ({ ...row, percent: total > 0 ? Math.round((row.total / total) * 100) : 0 }))
+        .sort((first, second) => second.total - first.total)
+    })()
+
+    const locationRows = data.subcounties
+      .map((subcounty) => {
+        const wards = data.wards.filter((ward) => ward.subcounty_id === subcounty.id)
+        const subcountyProjects = filteredProjects.filter((project) => {
+          const ward = data.wards.find((item) => item.id === project.ward_id)
+          return ward?.subcounty_id === subcounty.id
+        })
+
+        return {
+          subcounty,
+          wardCount: wards.length,
+          projectCount: subcountyProjects.length,
+          budget: subcountyProjects.reduce((sum, project) => sum + project.budget, 0),
+        }
+      })
+      .sort((first, second) => second.projectCount - first.projectCount)
+
+    const statusRows = projectStatuses.map((status) => ({
+      status,
+      count: filteredProjects.filter((project) => project.status === status).length,
+    }))
+
+    const directorateFinancials = uniqueOptions(filteredProjects.map((project) => project.directorate)).map((option) => {
+      const projectsInDirectorate = filteredProjects.filter((project) => project.directorate === option.value)
+      return {
+        label: option.label,
+        budget: projectsInDirectorate.reduce((sum, project) => sum + project.budget, 0),
+        actualCost: projectsInDirectorate.reduce((sum, project) => sum + project.actual_cost, 0),
+      }
+    })
+
+    const pmcRows = uniqueOptions(filteredProjects.map((project) => project.contractor)).map((option) => {
+      const projectsForContractor = filteredProjects.filter((project) => project.contractor === option.value)
+      return {
+        contractor: option.value,
+        projectCount: projectsForContractor.length,
+        contractSum: projectsForContractor.reduce((sum, project) => sum + project.contract_sum, 0),
+        averageProgress: projectsForContractor.length
+          ? Math.round(projectsForContractor.reduce((sum, project) => sum + project.progress, 0) / projectsForContractor.length)
+          : 0,
+      }
+    })
+
     return (
       <div className="grid gap-5">
-        {canCreateProject ? (
+        <section className="reveal rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <DashboardTabs tabs={projectsTabs} active={projectsTab} onChange={setProjectsTab} />
+            <LiveClock />
+          </div>
+        </section>
+
+        <section className="reveal rounded-lg border border-zinc-200 bg-white p-5 shadow-sm">
+          <h2 className="text-lg font-bold text-zinc-950">{settings.countyName} Executive Dashboard</h2>
+          <p className="mt-1 text-sm text-zinc-500">Projects Stock Dashboard — Interactive analytics and summaries</p>
+        </section>
+
+        <Panel icon={Search} title="Filters">
+          <p className="-mt-1 mb-4 text-xs font-medium text-zinc-500">All filters update in realtime</p>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+            <SelectField
+              label="Sub County"
+              value={projectFilters.subcounty_id}
+              options={withAllOption(subcountyOptions)}
+              onChange={(value) => setProjectFilters((filters) => ({ ...filters, subcounty_id: value, ward_id: 'ALL' }))}
+            />
+            <SelectField
+              label="Ward"
+              value={projectFilters.ward_id}
+              options={withAllOption(
+                projectFilters.subcounty_id === 'ALL'
+                  ? wardOptions
+                  : data.wards
+                      .filter((ward) => String(ward.subcounty_id) === projectFilters.subcounty_id)
+                      .map((ward) => ({ value: String(ward.id), label: ward.name })),
+              )}
+              onChange={(value) => setProjectFilters((filters) => ({ ...filters, ward_id: value }))}
+            />
+            <SelectField
+              label="Sector"
+              value={projectFilters.directorate}
+              options={withAllOption(directorateFilterOptions)}
+              onChange={(value) => setProjectFilters((filters) => ({ ...filters, directorate: value }))}
+            />
+            <SelectField
+              label="Status"
+              value={projectFilters.status}
+              options={withAllOption(statusOptions)}
+              onChange={(value) => setProjectFilters((filters) => ({ ...filters, status: value }))}
+            />
+            <SelectField
+              label="FY"
+              value={projectFilters.financial_year}
+              options={withAllOption(financialYearFilterOptions)}
+              onChange={(value) => setProjectFilters((filters) => ({ ...filters, financial_year: value }))}
+            />
+            <SelectField
+              label="Contractor"
+              value={projectFilters.contractor}
+              options={withAllOption(contractorFilterOptions)}
+              onChange={(value) => setProjectFilters((filters) => ({ ...filters, contractor: value }))}
+            />
+          </div>
+          <div className="mt-4">
+            <button
+              className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-700 shadow-sm transition hover:bg-zinc-50"
+              type="button"
+              title="Reset"
+              onClick={() => setProjectFilters(projectFilterDefaults)}
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+              Reset
+            </button>
+          </div>
+        </Panel>
+
+        {projectsTab === 'dashboard' ? (
+          <>
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <StatTile
+                icon={Construction}
+                label="Total Projects"
+                value={filteredProjects.length.toLocaleString()}
+                tone="bg-sky-50 text-sky-700"
+              />
+              <StatTile icon={DollarSign} label="Total Budget" value={money(dashboardTotalBudget)} tone="bg-emerald-50 text-emerald-700" />
+              <StatTile
+                icon={CircleCheck}
+                label="Completed"
+                value={dashboardCompletedCount.toLocaleString()}
+                tone="bg-emerald-50 text-emerald-700"
+              />
+              <StatTile icon={Timer} label="Ongoing" value={dashboardOngoingCount.toLocaleString()} tone="bg-amber-50 text-amber-700" />
+            </div>
+
+            <div className="grid gap-5 xl:grid-cols-2">
+              <ChartCard title="Projects by Sector" subtitle="Sector Distribution" tag="Interactive">
+                <SectorBarChart data={dashboardSectorData} />
+              </ChartCard>
+              <ChartCard title="Projects by Status" subtitle="Status Breakdown" tag="Realtime">
+                <StatusDonutChart segments={dashboardStatusSegments} total={filteredProjects.length} />
+              </ChartCard>
+            </div>
+
+            <ChartCard title="Project Trends" subtitle="Projects by Financial Year" tag="Animated">
+              <TrendLineChart data={dashboardTrendData} />
+            </ChartCard>
+
+            <ChartCard title="Projects by Sub-County" subtitle="Geographic distribution" tag="Live">
+              <SubcountyBreakdown rows={dashboardSubcountyRows} />
+            </ChartCard>
+          </>
+        ) : null}
+
+        {projectsTab === 'location' ? (
+          <Panel icon={MapPinned} title="Projects by Location">
+            <div className="overflow-hidden rounded-lg border border-zinc-200">
+              <table className="min-w-full divide-y divide-zinc-200 text-left text-sm">
+                <thead className="bg-zinc-50 text-xs font-semibold uppercase text-zinc-500">
+                  <tr>
+                    <th className="px-4 py-3">Sub-county</th>
+                    <th className="px-4 py-3">Wards</th>
+                    <th className="px-4 py-3">Projects</th>
+                    <th className="px-4 py-3">Budget Allocation</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-100">
+                  {locationRows.map((row) => (
+                    <tr className="hover:bg-emerald-50/40" key={row.subcounty.id}>
+                      <td className="px-4 py-3 font-semibold text-zinc-950">{row.subcounty.name}</td>
+                      <td className="px-4 py-3 text-zinc-700">{row.wardCount}</td>
+                      <td className="px-4 py-3 text-zinc-700">{row.projectCount}</td>
+                      <td className="px-4 py-3 text-zinc-700">{money(row.budget)}</td>
+                    </tr>
+                  ))}
+                  {locationRows.length === 0 ? (
+                    <tr>
+                      <td className="px-4 py-8 text-center text-sm text-zinc-500" colSpan={4}>
+                        No location data found
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+        ) : null}
+
+        {projectsTab === 'status' ? (
+          <Panel icon={Gauge} title="Status Breakdown">
+            <div className="grid gap-4">
+              {statusRows.map((row) => (
+                <BarRow
+                  key={row.status}
+                  label={labelFromCode(row.status)}
+                  value={row.count}
+                  total={filteredProjects.length}
+                  tone={statusStyles[row.status].includes('emerald') ? 'bg-emerald-500' : 'bg-sky-500'}
+                />
+              ))}
+            </div>
+          </Panel>
+        ) : null}
+
+        {projectsTab === 'financials' ? (
+          <div className="grid gap-5">
+            <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              <StatTile icon={DollarSign} label="Total Budget" value={money(dashboardTotalBudget)} tone="bg-emerald-50 text-emerald-700" />
+              <StatTile
+                icon={WalletCards}
+                label="Amount Paid To Date"
+                value={money(filteredProjects.reduce((sum, project) => sum + project.actual_cost, 0))}
+                tone="bg-sky-50 text-sky-700"
+              />
+              <StatTile
+                icon={Activity}
+                label="Vote Balance"
+                value={money(filteredProjects.reduce((sum, project) => sum + project.vote_balance, 0))}
+                tone="bg-amber-50 text-amber-700"
+              />
+            </div>
+            <Panel icon={DollarSign} title="Budget by Directorate/SAGA">
+              <div className="grid gap-4">
+                {directorateFinancials.map((row) => (
+                  <div className="grid gap-1" key={row.label}>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="font-medium text-zinc-700">{row.label}</span>
+                      <span className="text-zinc-500">
+                        {money(row.actualCost)} / {money(row.budget)}
+                      </span>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-md bg-zinc-100">
+                      <div
+                        className="h-full rounded-md bg-emerald-600"
+                        style={{ width: `${row.budget > 0 ? Math.min(100, Math.round((row.actualCost / row.budget) * 100)) : 0}%` }}
+                      />
+                    </div>
+                  </div>
+                ))}
+                {directorateFinancials.length === 0 ? (
+                  <p className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-6 text-center text-sm text-zinc-500">
+                    No financial data found
+                  </p>
+                ) : null}
+              </div>
+            </Panel>
+          </div>
+        ) : null}
+
+        {projectsTab === 'pmc' ? (
+          <Panel icon={Users} title="Contractors / Project Management">
+            <div className="overflow-hidden rounded-lg border border-zinc-200">
+              <table className="min-w-full divide-y divide-zinc-200 text-left text-sm">
+                <thead className="bg-zinc-50 text-xs font-semibold uppercase text-zinc-500">
+                  <tr>
+                    <th className="px-4 py-3">Contractor</th>
+                    <th className="px-4 py-3">Projects</th>
+                    <th className="px-4 py-3">Contract Sum</th>
+                    <th className="px-4 py-3">Average Progress</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-100">
+                  {pmcRows.map((row) => (
+                    <tr className="hover:bg-emerald-50/40" key={row.contractor}>
+                      <td className="px-4 py-3 font-semibold text-zinc-950">{row.contractor}</td>
+                      <td className="px-4 py-3 text-zinc-700">{row.projectCount}</td>
+                      <td className="px-4 py-3 text-zinc-700">{money(row.contractSum)}</td>
+                      <td className="px-4 py-3 text-zinc-700">{row.averageProgress}%</td>
+                    </tr>
+                  ))}
+                  {pmcRows.length === 0 ? (
+                    <tr>
+                      <td className="px-4 py-8 text-center text-sm text-zinc-500" colSpan={4}>
+                        No contractor data found
+                      </td>
+                    </tr>
+                  ) : null}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+        ) : null}
+
+        {projectsTab === 'report' ? (
+          <Panel icon={ClipboardList} title="Summary Report">
+            <div className="grid gap-5">
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <StatTile
+                  icon={Construction}
+                  label="Total Projects"
+                  value={filteredProjects.length.toLocaleString()}
+                  tone="bg-sky-50 text-sky-700"
+                />
+                <StatTile icon={DollarSign} label="Total Budget" value={money(dashboardTotalBudget)} tone="bg-emerald-50 text-emerald-700" />
+                <StatTile
+                  icon={CircleCheck}
+                  label="Completed"
+                  value={dashboardCompletedCount.toLocaleString()}
+                  tone="bg-emerald-50 text-emerald-700"
+                />
+                <StatTile icon={Timer} label="Ongoing" value={dashboardOngoingCount.toLocaleString()} tone="bg-amber-50 text-amber-700" />
+              </div>
+              <button
+                className="inline-flex h-10 w-fit items-center justify-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-800"
+                type="button"
+                title="Print Report"
+                onClick={() => window.print()}
+              >
+                <Printer className="h-4 w-4" aria-hidden="true" />
+                Print Report
+              </button>
+            </div>
+          </Panel>
+        ) : null}
+
+        {projectsTab === 'feedback' ? (
+          <div className="grid gap-5">
+            <Panel icon={MessageSquare} title="Share Feedback">
+              <form className="grid gap-4 md:grid-cols-2" onSubmit={handleAddFeedback}>
+                <TextField
+                  label="Name"
+                  value={feedbackDraft.name}
+                  onChange={(value) => setFeedbackDraft((draft) => ({ ...draft, name: value }))}
+                />
+                <TextField
+                  label="Email"
+                  type="email"
+                  value={feedbackDraft.email}
+                  required={false}
+                  onChange={(value) => setFeedbackDraft((draft) => ({ ...draft, email: value }))}
+                />
+                <TextAreaField
+                  label="Message"
+                  value={feedbackDraft.message}
+                  onChange={(value) => setFeedbackDraft((draft) => ({ ...draft, message: value }))}
+                />
+                <div className="md:col-span-2">
+                  <SubmitButton label="Submit Feedback" />
+                </div>
+              </form>
+            </Panel>
+
+            <div className="grid gap-3">
+              {feedbackEntries.map((entry) => (
+                <article className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm" key={entry.id}>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-semibold text-zinc-950">{entry.name}</p>
+                    <span className="text-xs text-zinc-500">{entry.created_at}</span>
+                  </div>
+                  <p className="mt-2 text-sm text-zinc-600">{entry.message}</p>
+                </article>
+              ))}
+              {feedbackEntries.length === 0 ? (
+                <p className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-6 text-center text-sm text-zinc-500">
+                  No feedback submitted yet
+                </p>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
+        {projectsTab === 'projects' ? (
+          <>
+            {canCreateProject ? (
           <Panel icon={Construction} title="Add Project">
+            {showAddProjectForm ? (
             <form className="grid gap-4 md:grid-cols-2 xl:grid-cols-4" onSubmit={handleAddProject}>
               <TextField
                 label="SNo"
@@ -1909,70 +2412,31 @@ function App() {
                 required={false}
                 onChange={(value) => setProjectDraft((draft) => ({ ...draft, remarks: value }))}
               />
-              <div className="md:col-span-2 xl:col-span-full">
+              <div className="flex items-center gap-3 md:col-span-2 xl:col-span-full">
                 <SubmitButton label="Add Project" />
+                <button
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-700 shadow-sm transition hover:bg-zinc-50"
+                  type="button"
+                  title="Cancel"
+                  onClick={() => setShowAddProjectForm(false)}
+                >
+                  Cancel
+                </button>
               </div>
             </form>
+            ) : (
+              <button
+                className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-800"
+                type="button"
+                title="Add Project"
+                onClick={() => setShowAddProjectForm(true)}
+              >
+                <Plus className="h-4 w-4" aria-hidden="true" />
+                Add Project
+              </button>
+            )}
           </Panel>
         ) : null}
-
-        <Panel icon={Search} title="Project Filters">
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-            <SelectField
-              label="Financial Year"
-              value={projectFilters.financial_year}
-              options={withAllOption(financialYearFilterOptions)}
-              onChange={(value) => setProjectFilters((filters) => ({ ...filters, financial_year: value }))}
-            />
-            <SelectField
-              label="Sub-county"
-              value={projectFilters.subcounty_id}
-              options={withAllOption(subcountyOptions)}
-              onChange={(value) => setProjectFilters((filters) => ({ ...filters, subcounty_id: value, ward_id: 'ALL' }))}
-            />
-            <SelectField
-              label="Ward"
-              value={projectFilters.ward_id}
-              options={withAllOption(
-                projectFilters.subcounty_id === 'ALL'
-                  ? wardOptions
-                  : data.wards
-                      .filter((ward) => String(ward.subcounty_id) === projectFilters.subcounty_id)
-                      .map((ward) => ({ value: String(ward.id), label: ward.name })),
-              )}
-              onChange={(value) => setProjectFilters((filters) => ({ ...filters, ward_id: value }))}
-            />
-            <SelectField
-              label="Current Status"
-              value={projectFilters.status}
-              options={withAllOption(statusOptions)}
-              onChange={(value) => setProjectFilters((filters) => ({ ...filters, status: value }))}
-            />
-            <SelectField
-              label="Directorate/SAGA"
-              value={projectFilters.directorate}
-              options={withAllOption(directorateFilterOptions)}
-              onChange={(value) => setProjectFilters((filters) => ({ ...filters, directorate: value }))}
-            />
-            <SelectField
-              label="Contractor"
-              value={projectFilters.contractor}
-              options={withAllOption(contractorFilterOptions)}
-              onChange={(value) => setProjectFilters((filters) => ({ ...filters, contractor: value }))}
-            />
-            <div className="self-end xl:col-span-full">
-              <button
-                className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-700 shadow-sm transition hover:bg-zinc-50"
-                type="button"
-                title="Reset Filters"
-                onClick={() => setProjectFilters(projectFilterDefaults)}
-              >
-                <X className="h-4 w-4" aria-hidden="true" />
-                Reset Filters
-              </button>
-            </div>
-          </div>
-        </Panel>
 
         <DataTable<Project>
           rows={filteredProjects}
@@ -2153,6 +2617,8 @@ function App() {
               </div>
             </div>
           </Panel>
+        ) : null}
+          </>
         ) : null}
       </div>
     )

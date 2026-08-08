@@ -1,6 +1,6 @@
 import { ConvexHttpClient } from 'convex/browser'
 import { api } from '../convex/_generated/api'
-import { initialData, type PortalData } from './data'
+import { initialData, type ApprovalStatus, type PortalData } from './data'
 
 const CONVEX_URL = import.meta.env.VITE_CONVEX_URL as string | undefined
 const client = CONVEX_URL ? new ConvexHttpClient(CONVEX_URL) : null
@@ -34,7 +34,13 @@ export async function loadPortalData(): Promise<PortalData> {
   }
 
   try {
-    return (await client.query(api.portal.getPortalData, {})) as PortalData
+    const portalData = (await client.query(api.portal.getPortalData, {})) as Partial<PortalData>
+    return {
+      ...portalData,
+      projectDocuments: portalData.projectDocuments ?? [],
+      projectApprovals: portalData.projectApprovals ?? [],
+      auditEntries: portalData.auditEntries ?? [],
+    } as PortalData
   } catch (error) {
     throw new Error(normalizeError(error))
   }
@@ -60,6 +66,67 @@ export async function markNotificationReadRequest(id: number) {
 
 export async function markAllNotificationsReadRequest() {
   return configuredClient().mutation(api.portal.markAllNotificationsRead, {})
+}
+
+export async function uploadProjectDocument({
+  projectId,
+  category,
+  file,
+  uploadedBy,
+}: {
+  projectId: number
+  category: string
+  file: File
+  uploadedBy: string
+}) {
+  const configured = configuredClient()
+  const uploadUrl = await configured.mutation(api.portal.generateProjectDocumentUploadUrl, {})
+  const response = await fetch(uploadUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': file.type || 'application/octet-stream' },
+    body: file,
+  })
+
+  if (!response.ok) {
+    throw new Error('The document upload could not be completed.')
+  }
+
+  const { storageId } = (await response.json()) as { storageId: string }
+  return configured.mutation(api.portal.saveProjectDocument, {
+    project_id: projectId,
+    category,
+    file_name: file.name,
+    mime_type: file.type || 'application/octet-stream',
+    size_bytes: file.size,
+    storage_id: storageId as never,
+    uploaded_by: uploadedBy,
+  })
+}
+
+export async function submitProjectForApprovalRequest(projectId: number, submittedBy: string) {
+  return configuredClient().mutation(api.portal.submitProjectForApproval, {
+    project_id: projectId,
+    submitted_by: submittedBy,
+  })
+}
+
+export async function reviewProjectApprovalRequest({
+  approvalId,
+  decision,
+  actedBy,
+  comment,
+}: {
+  approvalId: number
+  decision: Extract<ApprovalStatus, 'APPROVED' | 'REJECTED'>
+  actedBy: string
+  comment: string
+}) {
+  return configuredClient().mutation(api.portal.reviewProjectApproval, {
+    approval_id: approvalId,
+    decision,
+    acted_by: actedBy,
+    action_comment: comment,
+  })
 }
 
 export async function submitFeedback(payload: { name: string; email: string | null; message: string }) {

@@ -40,6 +40,9 @@ export const reset = mutation({
       'projectUpdates',
       'users',
       'notifications',
+      'projectDocuments',
+      'projectApprovals',
+      'auditEntries',
       'feedback',
     ] as const
 
@@ -316,6 +319,73 @@ export const run = mutation({
         progress: update.progress,
         status: update.status,
         created_at: update.created_at,
+      })
+    }
+
+    const approvals = [
+      {
+        project_index: 0,
+        step: 'Technical Review',
+        status: 'APPROVED',
+        submitted_by: 'Clerk / Secretary',
+        acted_by: 'System Administrator',
+        action_comment: 'Technical scope and implementation plan confirmed.',
+        created_at: '2026-07-18 09:30',
+        acted_at: '2026-07-19 11:15',
+      },
+      {
+        project_index: 0,
+        step: 'Budget Clearance',
+        status: 'PENDING',
+        submitted_by: 'System Administrator',
+        acted_by: '',
+        action_comment: '',
+        created_at: '2026-07-19 11:15',
+        acted_at: '',
+      },
+    ]
+
+    for (const approval of approvals) {
+      const { project_index, ...approvalFields } = approval
+      const id = await nextId(ctx, 'projectApprovals')
+      await ctx.db.insert('projectApprovals', {
+        id,
+        project_id: projectIds[project_index],
+        ...approvalFields,
+      })
+    }
+
+    const auditEntries = [
+      {
+        project_index: 0,
+        actor: 'Clerk / Secretary',
+        action: 'Submitted for approval',
+        details: 'Submitted the project for technical review.',
+        created_at: '2026-07-18 09:30',
+      },
+      {
+        project_index: 0,
+        actor: 'System Administrator',
+        action: 'Approved Technical Review',
+        details: 'Technical scope and implementation plan confirmed.',
+        created_at: '2026-07-19 11:15',
+      },
+      {
+        project_index: 0,
+        actor: 'System',
+        action: 'Queued Budget Clearance',
+        details: 'The project is awaiting budget clearance.',
+        created_at: '2026-07-19 11:15',
+      },
+    ]
+
+    for (const entry of auditEntries) {
+      const { project_index, ...entryFields } = entry
+      const id = await nextId(ctx, 'auditEntries')
+      await ctx.db.insert('auditEntries', {
+        id,
+        project_id: projectIds[project_index],
+        ...entryFields,
       })
     }
 

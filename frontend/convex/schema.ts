@@ -110,6 +110,45 @@ export default defineSchema({
     read: v.boolean(),
   }).index('by_num_id', ['id']),
 
+  projectDocuments: defineTable({
+    id: v.number(),
+    project_id: v.number(),
+    category: v.string(),
+    file_name: v.string(),
+    mime_type: v.string(),
+    size_bytes: v.number(),
+    storage_id: v.id('_storage'),
+    uploaded_by: v.string(),
+    created_at: v.string(),
+  })
+    .index('by_num_id', ['id'])
+    .index('by_project_id', ['project_id']),
+
+  projectApprovals: defineTable({
+    id: v.number(),
+    project_id: v.number(),
+    step: v.string(),
+    status: v.string(),
+    submitted_by: v.string(),
+    acted_by: v.string(),
+    action_comment: v.string(),
+    created_at: v.string(),
+    acted_at: v.string(),
+  })
+    .index('by_num_id', ['id'])
+    .index('by_project_id', ['project_id']),
+
+  auditEntries: defineTable({
+    id: v.number(),
+    project_id: v.number(),
+    actor: v.string(),
+    action: v.string(),
+    details: v.string(),
+    created_at: v.string(),
+  })
+    .index('by_num_id', ['id'])
+    .index('by_project_id', ['project_id']),
+
   feedback: defineTable({
     id: v.number(),
     name: v.string(),

@@ -2,10 +2,25 @@ import { mutation, query } from './_generated/server'
 import { v } from 'convex/values'
 import { nextId, nowIso } from './lib'
 
+const approvalSteps = ['Technical Review', 'Budget Clearance', 'Executive Approval'] as const
+
 export const getPortalData = query({
   args: {},
   handler: async (ctx) => {
-    const [subcounties, wards, sublocations, villages, citizens, projects, projectUpdates, users, notifications] =
+    const [
+      subcounties,
+      wards,
+      sublocations,
+      villages,
+      citizens,
+      projects,
+      projectUpdates,
+      users,
+      notifications,
+      projectDocuments,
+      projectApprovals,
+      auditEntries,
+    ] =
       await Promise.all([
         ctx.db.query('subcounties').withIndex('by_num_id').collect(),
         ctx.db.query('wards').withIndex('by_num_id').collect(),
@@ -16,12 +31,22 @@ export const getPortalData = query({
         ctx.db.query('projectUpdates').withIndex('by_num_id').collect(),
         ctx.db.query('users').withIndex('by_num_id').collect(),
         ctx.db.query('notifications').withIndex('by_num_id').collect(),
+        ctx.db.query('projectDocuments').withIndex('by_num_id').collect(),
+        ctx.db.query('projectApprovals').withIndex('by_num_id').collect(),
+        ctx.db.query('auditEntries').withIndex('by_num_id').collect(),
       ])
 
     const strip = <T extends { _id: unknown; _creationTime: unknown }>(doc: T) => {
       const { _id, _creationTime, ...rest } = doc
       return rest
     }
+
+    const documentsWithUrls = await Promise.all(
+      projectDocuments.map(async ({ _id, _creationTime, storage_id, ...document }) => ({
+        ...document,
+        url: await ctx.storage.getUrl(storage_id),
+      })),
+    )
 
     return {
       subcounties: subcounties.map(strip),
@@ -33,6 +58,9 @@ export const getPortalData = query({
       projectUpdates: projectUpdates.map(strip),
       users: users.map(strip),
       notifications: notifications.map(strip),
+      projectDocuments: documentsWithUrls,
+      projectApprovals: projectApprovals.map(strip),
+      auditEntries: auditEntries.map(strip),
     }
   },
 })
@@ -200,6 +228,154 @@ export const createProjectUpdate = mutation({
     }
 
     return { id }
+  },
+})
+
+export const generateProjectDocumentUploadUrl = mutation({
+  args: {},
+  handler: async (ctx) => ctx.storage.generateUploadUrl(),
+})
+
+export const saveProjectDocument = mutation({
+  args: {
+    project_id: v.number(),
+    category: v.string(),
+    file_name: v.string(),
+    mime_type: v.string(),
+    size_bytes: v.number(),
+    storage_id: v.id('_storage'),
+    uploaded_by: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const id = await nextId(ctx, 'projectDocuments')
+    await ctx.db.insert('projectDocuments', {
+      id,
+      ...args,
+      created_at: nowIso(),
+    })
+    return { id }
+  },
+})
+
+export const submitProjectForApproval = mutation({
+  args: { project_id: v.number(), submitted_by: v.string() },
+  handler: async (ctx, args) => {
+    const pendingApproval = await ctx.db
+      .query('projectApprovals')
+      .withIndex('by_project_id', (q) => q.eq('project_id', args.project_id))
+      .filter((q) => q.eq(q.field('status'), 'PENDING'))
+      .first()
+
+    if (pendingApproval) {
+      throw new Error('This project already has a pending approval step.')
+    }
+
+    const timestamp = nowIso()
+    const approvalId = await nextId(ctx, 'projectApprovals')
+    await ctx.db.insert('projectApprovals', {
+      id: approvalId,
+      project_id: args.project_id,
+      step: approvalSteps[0],
+      status: 'PENDING',
+      submitted_by: args.submitted_by,
+      acted_by: '',
+      action_comment: '',
+      created_at: timestamp,
+      acted_at: '',
+    })
+
+    const auditId = await nextId(ctx, 'auditEntries')
+    await ctx.db.insert('auditEntries', {
+      id: auditId,
+      project_id: args.project_id,
+      actor: args.submitted_by,
+      action: 'Submitted for approval',
+      details: `Submitted the project for ${approvalSteps[0].toLowerCase()}.`,
+      created_at: timestamp,
+    })
+
+    return { id: approvalId }
+  },
+})
+
+export const reviewProjectApproval = mutation({
+  args: {
+    approval_id: v.number(),
+    decision: v.union(v.literal('APPROVED'), v.literal('REJECTED')),
+    acted_by: v.string(),
+    action_comment: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const approval = await ctx.db
+      .query('projectApprovals')
+      .withIndex('by_num_id', (q) => q.eq('id', args.approval_id))
+      .unique()
+
+    if (!approval) {
+      throw new Error('Approval request not found.')
+    }
+
+    if (approval.status !== 'PENDING') {
+      throw new Error('This approval step has already been actioned.')
+    }
+
+    const timestamp = nowIso()
+    await ctx.db.patch(approval._id, {
+      status: args.decision,
+      acted_by: args.acted_by,
+      action_comment: args.action_comment,
+      acted_at: timestamp,
+    })
+
+    const auditId = await nextId(ctx, 'auditEntries')
+    await ctx.db.insert('auditEntries', {
+      id: auditId,
+      project_id: approval.project_id,
+      actor: args.acted_by,
+      action: `${args.decision === 'APPROVED' ? 'Approved' : 'Rejected'} ${approval.step}`,
+      details: args.action_comment || `${approval.step} was ${args.decision.toLowerCase()}.`,
+      created_at: timestamp,
+    })
+
+    if (args.decision === 'APPROVED') {
+      const currentStep = approvalSteps.indexOf(approval.step as (typeof approvalSteps)[number])
+      const nextStep = approvalSteps[currentStep + 1]
+
+      if (nextStep) {
+        const nextApprovalId = await nextId(ctx, 'projectApprovals')
+        await ctx.db.insert('projectApprovals', {
+          id: nextApprovalId,
+          project_id: approval.project_id,
+          step: nextStep,
+          status: 'PENDING',
+          submitted_by: args.acted_by,
+          acted_by: '',
+          action_comment: '',
+          created_at: timestamp,
+          acted_at: '',
+        })
+
+        const nextAuditId = await nextId(ctx, 'auditEntries')
+        await ctx.db.insert('auditEntries', {
+          id: nextAuditId,
+          project_id: approval.project_id,
+          actor: 'System',
+          action: `Queued ${nextStep}`,
+          details: `The project is awaiting ${nextStep.toLowerCase()}.`,
+          created_at: timestamp,
+        })
+      } else {
+        const completionAuditId = await nextId(ctx, 'auditEntries')
+        await ctx.db.insert('auditEntries', {
+          id: completionAuditId,
+          project_id: approval.project_id,
+          actor: 'System',
+          action: 'Approval workflow complete',
+          details: 'All approval stages have been completed.',
+          created_at: timestamp,
+        })
+      }
+    }
   },
 })
 

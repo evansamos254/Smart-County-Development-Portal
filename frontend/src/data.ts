@@ -105,6 +105,41 @@ export type Notification = {
   read: boolean
 }
 
+export type ProjectDocument = {
+  id: number
+  project_id: number
+  category: string
+  file_name: string
+  mime_type: string
+  size_bytes: number
+  uploaded_by: string
+  created_at: string
+  url: string | null
+}
+
+export type ApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED'
+
+export type ProjectApproval = {
+  id: number
+  project_id: number
+  step: string
+  status: ApprovalStatus
+  submitted_by: string
+  acted_by: string
+  action_comment: string
+  created_at: string
+  acted_at: string
+}
+
+export type AuditEntry = {
+  id: number
+  project_id: number
+  actor: string
+  action: string
+  details: string
+  created_at: string
+}
+
 export type SettingsState = {
   countyName: string
   financialYear: string
@@ -123,6 +158,9 @@ export type PortalData = {
   projectUpdates: ProjectUpdate[]
   users: PortalUser[]
   notifications: Notification[]
+  projectDocuments: ProjectDocument[]
+  projectApprovals: ProjectApproval[]
+  auditEntries: AuditEntry[]
 }
 
 export const projectStatuses: ProjectStatus[] = [
@@ -431,6 +469,57 @@ export const initialData: PortalData = {
       type: 'Citizen',
       createdAt: '2026-07-22 11:03',
       read: true,
+    },
+  ],
+  projectDocuments: [],
+  projectApprovals: [
+    {
+      id: 1,
+      project_id: 1,
+      step: 'Technical Review',
+      status: 'APPROVED',
+      submitted_by: 'Clerk / Secretary',
+      acted_by: 'System Administrator',
+      action_comment: 'Technical scope and implementation plan confirmed.',
+      created_at: '2026-07-18 09:30',
+      acted_at: '2026-07-19 11:15',
+    },
+    {
+      id: 2,
+      project_id: 1,
+      step: 'Budget Clearance',
+      status: 'PENDING',
+      submitted_by: 'System Administrator',
+      acted_by: '',
+      action_comment: '',
+      created_at: '2026-07-19 11:15',
+      acted_at: '',
+    },
+  ],
+  auditEntries: [
+    {
+      id: 1,
+      project_id: 1,
+      actor: 'Clerk / Secretary',
+      action: 'Submitted for approval',
+      details: 'Submitted the project for technical review.',
+      created_at: '2026-07-18 09:30',
+    },
+    {
+      id: 2,
+      project_id: 1,
+      actor: 'System Administrator',
+      action: 'Approved Technical Review',
+      details: 'Technical scope and implementation plan confirmed.',
+      created_at: '2026-07-19 11:15',
+    },
+    {
+      id: 3,
+      project_id: 1,
+      actor: 'System',
+      action: 'Queued Budget Clearance',
+      details: 'The project is awaiting budget clearance.',
+      created_at: '2026-07-19 11:15',
     },
   ],
 }

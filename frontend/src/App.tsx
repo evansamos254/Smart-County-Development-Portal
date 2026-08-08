@@ -13,7 +13,9 @@ import {
   CircleSlash,
   ClipboardList,
   Construction,
+  Download,
   DollarSign,
+  FileText,
   Gauge,
   Home,
   Layers3,
@@ -33,6 +35,7 @@ import {
   Timer,
   UserCog,
   Users,
+  Upload,
   WalletCards,
   X,
 } from 'lucide-react'
@@ -61,15 +64,20 @@ import {
   loadPortalData,
   markAllNotificationsReadRequest,
   markNotificationReadRequest,
+  reviewProjectApprovalRequest,
+  submitProjectForApprovalRequest,
   submitFeedback,
+  uploadProjectDocument,
 } from './api'
 import type {
+  ApprovalStatus,
   Citizen,
   Notification,
   PortalData,
   PortalUser,
   Priority,
   Project,
+  ProjectApproval,
   ProjectStatus,
   SettingsState,
   Sex,
@@ -95,11 +103,14 @@ type ProjectsTabKey =
   | 'dashboard'
   | 'projects'
   | 'location'
+  | 'map'
   | 'status'
   | 'financials'
   | 'pmc'
   | 'report'
   | 'feedback'
+  | 'documents'
+  | 'approvals'
 
 type FeedbackEntry = {
   id: number
@@ -198,6 +209,27 @@ const priorityStyles: Record<Priority, string> = {
   MEDIUM: 'bg-sky-100 text-sky-800 border-sky-200',
   HIGH: 'bg-rose-100 text-rose-800 border-rose-200',
 }
+
+const approvalStatusStyles: Record<ApprovalStatus, string> = {
+  PENDING: 'bg-amber-100 text-amber-800 border-amber-200',
+  APPROVED: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+  REJECTED: 'bg-rose-100 text-rose-800 border-rose-200',
+}
+
+const approvalStepRoles: Record<string, Role> = {
+  'Technical Review': 'System Administrator',
+  'Budget Clearance': 'System Administrator',
+  'Executive Approval': 'Governor',
+}
+
+const documentCategories = [
+  'Contract',
+  'Bill of Quantities',
+  'Progress Report',
+  'Site Photo',
+  'Completion Certificate',
+  'Other',
+]
 
 const defaultProjectDraft = {
   serial_number: '',
@@ -309,10 +341,13 @@ const projectsTabs: { key: ProjectsTabKey; label: string; icon: LucideIcon }[] =
   { key: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { key: 'projects', label: 'Projects', icon: Construction },
   { key: 'location', label: 'Location', icon: MapPinned },
+  { key: 'map', label: 'Map', icon: Map },
   { key: 'status', label: 'Status', icon: Gauge },
   { key: 'financials', label: 'Financials', icon: DollarSign },
   { key: 'pmc', label: 'PMC', icon: Users },
   { key: 'report', label: 'Report', icon: ClipboardList },
+  { key: 'documents', label: 'Documents', icon: FileText },
+  { key: 'approvals', label: 'Approvals', icon: ClipboardList },
   { key: 'feedback', label: 'Feedback', icon: MessageSquare },
 ]
 
@@ -334,6 +369,18 @@ function clampProgress(value: string | number) {
 
 function money(value: number) {
   return currencyFormatter.format(value)
+}
+
+function fileSize(value: number) {
+  if (value < 1024) {
+    return `${value} B`
+  }
+
+  if (value < 1024 * 1024) {
+    return `${Math.round(value / 102.4) / 10} KB`
+  }
+
+  return `${Math.round(value / (1024 * 1024) * 10) / 10} MB`
 }
 
 function labelFromCode(value: string) {
@@ -406,6 +453,16 @@ function PriorityBadge({ priority }: { priority: Priority }) {
   )
 }
 
+function ApprovalBadge({ status }: { status: ApprovalStatus }) {
+  return (
+    <span
+      className={`inline-flex h-7 items-center rounded-md border px-2 text-xs font-semibold ${approvalStatusStyles[status]}`}
+    >
+      {labelFromCode(status)}
+    </span>
+  )
+}
+
 function Panel({
   title,
   icon: Icon,
@@ -434,18 +491,22 @@ function TextField({
   onChange,
   type = 'text',
   required = true,
+  navyFocus = false,
 }: {
   label: string
   value: string
   onChange: (value: string) => void
   type?: string
   required?: boolean
+  navyFocus?: boolean
 }) {
   return (
     <label className="grid gap-1.5 text-sm font-medium text-zinc-700">
       <span>{label}</span>
       <input
-        className="h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-950 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+        className={`h-10 rounded-md border border-zinc-300 bg-white px-3 text-sm text-zinc-950 outline-none transition focus:ring-2 ${
+          navyFocus ? 'focus:border-[#4E68AF] focus:ring-[#DFE4F5]' : 'focus:border-emerald-500 focus:ring-emerald-100'
+        }`}
         type={type}
         value={value}
         required={required}
@@ -678,11 +739,11 @@ function LoginPage({
   onSubmit: (event: FormEvent<HTMLFormElement>) => void
 }) {
   return (
-    <main className="min-h-screen bg-[#f5f7f3] px-4 py-6 text-zinc-900 sm:px-6 lg:px-8">
+    <main className="min-h-screen bg-[#202B5D] px-4 py-6 text-zinc-900 sm:px-6 lg:px-8">
       <div className="mx-auto grid min-h-[calc(100vh-3rem)] max-w-md items-center">
         <section className="rounded-lg border border-zinc-200 bg-white p-5 shadow-sm sm:p-6">
           <div className="mb-5 flex items-center gap-3">
-            <span className="inline-flex h-10 w-10 items-center justify-center rounded-md bg-emerald-50 text-emerald-700">
+            <span className="inline-flex h-10 w-10 items-center justify-center rounded-md bg-[#F0F2FA] text-[#202B5D]">
               <LockKeyhole className="h-5 w-5" aria-hidden="true" />
             </span>
             <div>
@@ -692,15 +753,15 @@ function LoginPage({
           </div>
 
           <form className="grid gap-4" onSubmit={onSubmit}>
-            <TextField label="Email" value={email} type="email" onChange={onEmailChange} />
-            <TextField label="Password" value={password} type="password" onChange={onPasswordChange} />
+            <TextField label="Email" value={email} type="email" onChange={onEmailChange} navyFocus />
+            <TextField label="Password" value={password} type="password" onChange={onPasswordChange} navyFocus />
             {error ? (
               <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700">
                 {error}
               </div>
             ) : null}
             <button
-              className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-800 focus:outline-none focus:ring-2 focus:ring-emerald-200"
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-md bg-[#202B5D] px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-[#18234C] focus:outline-none focus:ring-2 focus:ring-[#C3CCEB]"
               type="submit"
               title="Sign In"
             >
@@ -745,6 +806,9 @@ function App() {
   const [updateDraft, setUpdateDraft] = useState(defaultUpdateDraft)
   const [userDraft, setUserDraft] = useState(defaultUserDraft)
   const [notificationDraft, setNotificationDraft] = useState(defaultNotificationDraft)
+  const [documentCategory, setDocumentCategory] = useState(documentCategories[0])
+  const [documentFile, setDocumentFile] = useState<File | null>(null)
+  const [approvalComment, setApprovalComment] = useState('')
 
   useEffect(() => {
     void refreshPortalData()
@@ -1303,6 +1367,73 @@ function App() {
     }
   }
 
+  async function handleDocumentUpload(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    if (!currentUser || !selectedProjectId || !documentFile || !canWriteProjectUpdates(currentUser.role)) {
+      return
+    }
+
+    setIsSyncing(true)
+    try {
+      await uploadProjectDocument({
+        projectId: selectedProjectId,
+        category: documentCategory,
+        file: documentFile,
+        uploadedBy: currentUser.name,
+      })
+      await refreshPortalData()
+      setDocumentFile(null)
+      setDocumentCategory(documentCategories[0])
+    } catch (error) {
+      reportApiError(error, 'Could not upload the project document.')
+    } finally {
+      setIsSyncing(false)
+    }
+  }
+
+  async function handleSubmitForApproval() {
+    if (
+      !currentUser ||
+      !selectedProjectId ||
+      (currentUser.role !== 'System Administrator' && currentUser.role !== 'Clerk / Secretary')
+    ) {
+      return
+    }
+
+    setIsSyncing(true)
+    try {
+      await submitProjectForApprovalRequest(selectedProjectId, currentUser.name)
+      await refreshPortalData()
+    } catch (error) {
+      reportApiError(error, 'Could not submit this project for approval.')
+    } finally {
+      setIsSyncing(false)
+    }
+  }
+
+  async function handleApprovalReview(approval: ProjectApproval, decision: Extract<ApprovalStatus, 'APPROVED' | 'REJECTED'>) {
+    if (!currentUser || approval.status !== 'PENDING' || approvalStepRoles[approval.step] !== currentUser.role) {
+      return
+    }
+
+    setIsSyncing(true)
+    try {
+      await reviewProjectApprovalRequest({
+        approvalId: approval.id,
+        decision,
+        actedBy: currentUser.name,
+        comment: approvalComment.trim(),
+      })
+      await refreshPortalData()
+      setApprovalComment('')
+    } catch (error) {
+      reportApiError(error, 'Could not update the approval request.')
+    } finally {
+      setIsSyncing(false)
+    }
+  }
+
   const filteredSubcounties = data.subcounties.filter((subcounty) =>
     matchesQuery([subcounty.name, subcounty.created_at], search),
   )
@@ -1746,8 +1877,27 @@ function App() {
           .filter((update) => update.project_id === selectedProject.id)
           .sort((first, second) => second.id - first.id)
       : []
+    const selectedProjectDocuments = selectedProject
+      ? data.projectDocuments
+          .filter((document) => document.project_id === selectedProject.id)
+          .sort((first, second) => second.id - first.id)
+      : []
+    const selectedProjectApprovals = selectedProject
+      ? data.projectApprovals
+          .filter((approval) => approval.project_id === selectedProject.id)
+          .sort((first, second) => second.id - first.id)
+      : []
+    const selectedProjectAuditEntries = selectedProject
+      ? data.auditEntries
+          .filter((entry) => entry.project_id === selectedProject.id)
+          .sort((first, second) => second.id - first.id)
+      : []
     const canCreateProject = canManage('projects')
     const canSubmitProgressUpdate = currentUser ? canWriteProjectUpdates(currentUser.role) : false
+    const canUploadDocuments = canSubmitProgressUpdate
+    const canSubmitForApproval = currentUser
+      ? currentUser.role === 'System Administrator' || currentUser.role === 'Clerk / Secretary'
+      : false
     const selectedProjectDetails = selectedProject
       ? [
           { label: 'SNo', value: selectedProject.serial_number || selectedProject.id },
@@ -1857,6 +2007,19 @@ function App() {
         }
       })
       .sort((first, second) => second.projectCount - first.projectCount)
+
+    const mapRows = data.subcounties
+      .map((subcounty) => ({
+        subcounty,
+        wards: data.wards
+          .filter((ward) => ward.subcounty_id === subcounty.id)
+          .map((ward) => ({
+            ward,
+            projects: filteredProjects.filter((project) => project.ward_id === ward.id),
+          }))
+          .filter((row) => row.projects.length > 0),
+      }))
+      .filter((row) => row.wards.length > 0)
 
     const statusRows = projectStatuses.map((status) => ({
       status,
@@ -2029,6 +2192,81 @@ function App() {
           </Panel>
         ) : null}
 
+        {projectsTab === 'map' ? (
+          <div className="grid gap-5 xl:grid-cols-[0.8fr_1.6fr]">
+            <Panel icon={Map} title="Project Coverage Map">
+              <div className="grid gap-4">
+                <p className="text-sm text-zinc-600">
+                  View projects by ward and select an area to open its project record.
+                </p>
+                <div className="grid gap-3">
+                  {mapRows.map(({ subcounty, wards }) => (
+                    <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3" key={subcounty.id}>
+                      <p className="font-semibold text-zinc-950">{subcounty.name}</p>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        {wards.reduce((total, row) => total + row.projects.length, 0)} active project
+                        {wards.reduce((total, row) => total + row.projects.length, 0) === 1 ? '' : 's'} across {wards.length} ward
+                        {wards.length === 1 ? '' : 's'}
+                      </p>
+                    </div>
+                  ))}
+                  {mapRows.length === 0 ? (
+                    <p className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-6 text-center text-sm text-zinc-500">
+                      No project locations match the current filters.
+                    </p>
+                  ) : null}
+                </div>
+              </div>
+            </Panel>
+
+            <Panel icon={MapPinned} title="Ward Project Markers">
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {mapRows.flatMap(({ subcounty, wards }) =>
+                  wards.map(({ ward, projects }) => {
+                    const budget = projects.reduce((total, project) => total + project.budget, 0)
+                    const leadProject = projects[0]
+
+                    return (
+                      <button
+                        className="grid gap-3 rounded-lg border border-zinc-200 bg-white p-4 text-left shadow-sm transition hover:border-emerald-300 hover:bg-emerald-50/40"
+                        key={ward.id}
+                        type="button"
+                        title={`Open ${ward.name} projects`}
+                        onClick={() => {
+                          setProjectFilters((filters) => ({
+                            ...filters,
+                            subcounty_id: String(subcounty.id),
+                            ward_id: String(ward.id),
+                          }))
+                          selectProject(leadProject.id)
+                          setProjectsTab('projects')
+                        }}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <span className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-emerald-50 text-emerald-700">
+                            <MapPinned className="h-5 w-5" aria-hidden="true" />
+                          </span>
+                          <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-700">
+                            {projects.length} project{projects.length === 1 ? '' : 's'}
+                          </span>
+                        </div>
+                        <div>
+                          <p className="font-bold text-zinc-950">{ward.name}</p>
+                          <p className="mt-1 text-xs font-medium text-zinc-500">{subcounty.name}</p>
+                        </div>
+                        <div className="border-t border-zinc-100 pt-3 text-xs text-zinc-600">
+                          <p className="truncate font-semibold text-zinc-800">{leadProject.name}</p>
+                          <p className="mt-1">{money(budget)} allocated</p>
+                        </div>
+                      </button>
+                    )
+                  }),
+                )}
+              </div>
+            </Panel>
+          </div>
+        ) : null}
+
         {projectsTab === 'status' ? (
           <Panel icon={Gauge} title="Status Breakdown">
             <div className="grid gap-4">
@@ -2122,6 +2360,250 @@ function App() {
               </table>
             </div>
           </Panel>
+        ) : null}
+
+        {projectsTab === 'documents' ? (
+          <div className="grid gap-5">
+            <Panel icon={FileText} title="Project Documents">
+              <div className="grid gap-5">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <SelectField
+                    label="Project"
+                    value={String(selectedProjectId ?? '')}
+                    options={data.projects.map((project) => ({ value: String(project.id), label: project.name }))}
+                    onChange={(value) => selectProject(Number(value))}
+                  />
+                  <div className="rounded-lg border border-emerald-100 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                    Upload contracts, BoQs, reports, site photos, and completion records to the selected project.
+                  </div>
+                </div>
+
+                {selectedProject ? (
+                  <form className="grid gap-4 rounded-lg border border-zinc-200 bg-zinc-50 p-4 md:grid-cols-2 xl:grid-cols-[1fr_1.6fr_auto]" onSubmit={handleDocumentUpload}>
+                    <SelectField
+                      label="Document type"
+                      value={documentCategory}
+                      options={documentCategories.map((category) => ({ value: category, label: category }))}
+                      onChange={setDocumentCategory}
+                    />
+                    <label className="grid gap-1.5 text-sm font-medium text-zinc-700">
+                      <span>File</span>
+                      <input
+                        className="h-10 rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 outline-none transition file:mr-3 file:rounded-md file:border-0 file:bg-emerald-50 file:px-2 file:py-1 file:text-xs file:font-semibold file:text-emerald-700 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                        type="file"
+                        required
+                        disabled={!canUploadDocuments || isSyncing}
+                        onChange={(event) => setDocumentFile(event.target.files?.[0] ?? null)}
+                      />
+                    </label>
+                    <div className="self-end">
+                      <button
+                        className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-800 disabled:bg-zinc-300 disabled:text-zinc-500"
+                        type="submit"
+                        disabled={!canUploadDocuments || !documentFile || isSyncing}
+                      >
+                        <Upload className="h-4 w-4" aria-hidden="true" />
+                        Upload
+                      </button>
+                    </div>
+                    {!canUploadDocuments ? (
+                      <p className="text-xs font-medium text-zinc-500 md:col-span-2 xl:col-span-3">
+                        Only a System Administrator or Clerk / Secretary can upload project documents.
+                      </p>
+                    ) : null}
+                  </form>
+                ) : (
+                  <p className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-6 text-center text-sm text-zinc-500">
+                    Select a project before uploading documents.
+                  </p>
+                )}
+              </div>
+            </Panel>
+
+            {selectedProject ? (
+              <Panel icon={FileText} title={`${selectedProject.name} Documents`}>
+                <div className="grid gap-3">
+                  {selectedProjectDocuments.map((document) => (
+                    <article className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-white p-4" key={document.id}>
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-emerald-50 text-emerald-700">
+                          <FileText className="h-5 w-5" aria-hidden="true" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate font-semibold text-zinc-950">{document.file_name}</p>
+                          <p className="mt-1 text-xs text-zinc-500">
+                            {document.category} · {fileSize(document.size_bytes)} · Uploaded by {document.uploaded_by} on {document.created_at}
+                          </p>
+                        </div>
+                      </div>
+                      {document.url ? (
+                        <a
+                          className="inline-flex h-9 items-center gap-2 rounded-md border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-700 transition hover:bg-zinc-50"
+                          href={document.url}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <Download className="h-4 w-4" aria-hidden="true" />
+                          Open
+                        </a>
+                      ) : (
+                        <span className="text-xs font-medium text-zinc-400">File unavailable</span>
+                      )}
+                    </article>
+                  ))}
+                  {selectedProjectDocuments.length === 0 ? (
+                    <p className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-6 text-center text-sm text-zinc-500">
+                      No documents have been uploaded for this project.
+                    </p>
+                  ) : null}
+                </div>
+              </Panel>
+            ) : null}
+          </div>
+        ) : null}
+
+        {projectsTab === 'approvals' ? (
+          <div className="grid gap-5">
+            <Panel icon={ClipboardList} title="Project Approval Workflow">
+              <div className="grid gap-5">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <SelectField
+                    label="Project"
+                    value={String(selectedProjectId ?? '')}
+                    options={data.projects.map((project) => ({ value: String(project.id), label: project.name }))}
+                    onChange={(value) => selectProject(Number(value))}
+                  />
+                  <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+                    Workflow: Technical Review → Budget Clearance → Executive Approval.
+                  </div>
+                </div>
+
+                {selectedProject ? (
+                  <>
+                    <div className="grid gap-3 md:grid-cols-3">
+                      {Object.keys(approvalStepRoles).map((step, index) => {
+                        const approval = selectedProjectApprovals.find((item) => item.step === step)
+                        return (
+                          <article className="rounded-lg border border-zinc-200 bg-white p-4" key={step}>
+                            <div className="flex items-center justify-between gap-3">
+                              <span className="text-xs font-bold text-zinc-400">STEP {index + 1}</span>
+                              {approval ? <ApprovalBadge status={approval.status} /> : <span className="text-xs font-medium text-zinc-400">Not started</span>}
+                            </div>
+                            <p className="mt-4 font-semibold text-zinc-950">{step}</p>
+                            <p className="mt-1 text-xs text-zinc-500">{approvalStepRoles[step]}</p>
+                          </article>
+                        )
+                      })}
+                    </div>
+
+                    {selectedProjectApprovals.every((approval) => approval.status !== 'PENDING') ? (
+                      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-4">
+                        <div>
+                          <p className="font-semibold text-zinc-950">Ready to start a workflow</p>
+                          <p className="mt-1 text-sm text-zinc-500">Submit this project to begin technical review.</p>
+                        </div>
+                        {canSubmitForApproval ? (
+                          <button
+                            className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-800 disabled:bg-zinc-300"
+                            type="button"
+                            disabled={isSyncing}
+                            onClick={() => void handleSubmitForApproval()}
+                          >
+                            <ClipboardList className="h-4 w-4" aria-hidden="true" />
+                            Submit for Approval
+                          </button>
+                        ) : null}
+                      </div>
+                    ) : null}
+
+                    <div className="grid gap-3">
+                      {selectedProjectApprovals.map((approval) => {
+                        const canReview = currentUser?.role === approvalStepRoles[approval.step] && approval.status === 'PENDING'
+                        return (
+                          <article className="rounded-lg border border-zinc-200 bg-white p-4" key={approval.id}>
+                            <div className="flex flex-wrap items-start justify-between gap-3">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="font-semibold text-zinc-950">{approval.step}</p>
+                                  <ApprovalBadge status={approval.status} />
+                                </div>
+                                <p className="mt-2 text-sm text-zinc-600">Submitted by {approval.submitted_by} on {approval.created_at}</p>
+                                {approval.acted_by ? (
+                                  <p className="mt-1 text-sm text-zinc-600">Actioned by {approval.acted_by} on {approval.acted_at}</p>
+                                ) : null}
+                                {approval.action_comment ? <p className="mt-2 text-sm text-zinc-500">{approval.action_comment}</p> : null}
+                              </div>
+                              <span className="rounded-md bg-zinc-100 px-2 py-1 text-xs font-semibold text-zinc-600">
+                                Reviewer: {approvalStepRoles[approval.step]}
+                              </span>
+                            </div>
+
+                            {canReview ? (
+                              <div className="mt-4 grid gap-3 border-t border-zinc-100 pt-4">
+                                <TextAreaField
+                                  label="Review comment"
+                                  value={approvalComment}
+                                  required={false}
+                                  onChange={setApprovalComment}
+                                />
+                                <div className="flex flex-wrap gap-3">
+                                  <button
+                                    className="inline-flex h-10 items-center justify-center gap-2 rounded-md bg-emerald-700 px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-800 disabled:bg-zinc-300"
+                                    type="button"
+                                    disabled={isSyncing}
+                                    onClick={() => void handleApprovalReview(approval, 'APPROVED')}
+                                  >
+                                    <Check className="h-4 w-4" aria-hidden="true" />
+                                    Approve
+                                  </button>
+                                  <button
+                                    className="inline-flex h-10 items-center justify-center gap-2 rounded-md border border-rose-200 bg-white px-4 text-sm font-semibold text-rose-700 transition hover:bg-rose-50 disabled:opacity-50"
+                                    type="button"
+                                    disabled={isSyncing}
+                                    onClick={() => void handleApprovalReview(approval, 'REJECTED')}
+                                  >
+                                    <X className="h-4 w-4" aria-hidden="true" />
+                                    Reject
+                                  </button>
+                                </div>
+                              </div>
+                            ) : null}
+                          </article>
+                        )
+                      })}
+                      {selectedProjectApprovals.length === 0 ? (
+                        <p className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-6 text-center text-sm text-zinc-500">
+                          No approval workflow has been started for this project.
+                        </p>
+                      ) : null}
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            </Panel>
+
+            {selectedProject ? (
+              <Panel icon={Activity} title={`${selectedProject.name} Audit Trail`}>
+                <div className="grid gap-3">
+                  {selectedProjectAuditEntries.map((entry) => (
+                    <article className="grid gap-1 rounded-lg border border-zinc-200 bg-zinc-50 p-4" key={entry.id}>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="font-semibold text-zinc-950">{entry.action}</p>
+                        <span className="text-xs font-medium text-zinc-500">{entry.created_at}</span>
+                      </div>
+                      <p className="text-sm text-zinc-600">{entry.details}</p>
+                      <p className="text-xs font-semibold text-emerald-700">{entry.actor}</p>
+                    </article>
+                  ))}
+                  {selectedProjectAuditEntries.length === 0 ? (
+                    <p className="rounded-md border border-zinc-200 bg-zinc-50 px-3 py-6 text-center text-sm text-zinc-500">
+                      No audit events have been recorded for this project.
+                    </p>
+                  ) : null}
+                </div>
+              </Panel>
+            ) : null}
+          </div>
         ) : null}
 
         {projectsTab === 'report' ? (

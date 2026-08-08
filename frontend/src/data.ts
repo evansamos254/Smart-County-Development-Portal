@@ -40,6 +40,8 @@ export type Citizen = {
 
 export type Project = {
   id: number
+  serial_number: string
+  department: string
   name: string
   description: string
   status: ProjectStatus
@@ -50,7 +52,27 @@ export type Project = {
   completion_date: string
   progress: number
   budget: number
+  contract_sum: number
+  contract_variation: number
   actual_cost: number
+  vote_balance: number
+  contractor: string
+  financial_year: string
+  flagship_type: string
+  procurement_type: string
+  directorate: string
+  source_of_funds: string
+  funded_from: string
+  advertisement_date: string
+  evaluation_date: string
+  awarding_date: string
+  site_handover_date: string
+  expected_start_date: string
+  sss_date: string
+  is_carry_over: boolean
+  is_emergency: boolean
+  remarks: string
+  ward_hq_project: string
   created_at: string
   updated_at: string
 }
@@ -120,6 +142,31 @@ export const initialSettings: SettingsState = {
   smsAlerts: true,
   emailReports: true,
   publicPortal: false,
+}
+
+const projectTrackingDefaults = {
+  serial_number: '',
+  department: 'Public Works, Roads and Transport',
+  contract_sum: 0,
+  contract_variation: 0,
+  vote_balance: 0,
+  contractor: '',
+  financial_year: 'FY2026/2027',
+  flagship_type: 'non flagship',
+  procurement_type: 'procurable',
+  directorate: 'Roads',
+  source_of_funds: 'GOK',
+  funded_from: 'both',
+  advertisement_date: '',
+  evaluation_date: '',
+  awarding_date: '',
+  site_handover_date: '',
+  expected_start_date: '',
+  sss_date: '',
+  is_carry_over: false,
+  is_emergency: false,
+  remarks: '',
+  ward_hq_project: '',
 }
 
 export const initialData: PortalData = {
@@ -220,6 +267,11 @@ export const initialData: PortalData = {
   projects: [
     {
       id: 1,
+      ...projectTrackingDefaults,
+      serial_number: '1',
+      contract_sum: 18500000,
+      vote_balance: 7300000,
+      contractor: 'County Works Team',
       name: 'Market Ward Water Extension',
       description: 'Extend clean water access to Mwangaza and Umoja villages.',
       status: 'IN_PROGRESS',
@@ -236,6 +288,12 @@ export const initialData: PortalData = {
     },
     {
       id: 2,
+      ...projectTrackingDefaults,
+      serial_number: '2',
+      contract_sum: 7200000,
+      vote_balance: 6700000,
+      contractor: 'County Works Team',
+      directorate: 'Public works',
       name: 'Green Valley ECDE Renovation',
       description: 'Renovate classrooms and sanitation facilities.',
       status: 'PLANNED',
@@ -252,6 +310,11 @@ export const initialData: PortalData = {
     },
     {
       id: 3,
+      ...projectTrackingDefaults,
+      serial_number: '3',
+      contract_sum: 26800000,
+      vote_balance: 17500000,
+      contractor: 'Roads Maintenance Unit',
       name: 'Harbor Access Road',
       description: 'Grade and murram the feeder road into Harbor Landing.',
       status: 'ON_HOLD',
@@ -268,6 +331,12 @@ export const initialData: PortalData = {
     },
     {
       id: 4,
+      ...projectTrackingDefaults,
+      serial_number: '4',
+      contract_sum: 4800000,
+      vote_balance: 250000,
+      contractor: 'Energy Works Unit',
+      directorate: 'Energy',
       name: 'Hilltop Solar Streetlights',
       description: 'Install public lighting around Hilltop Junction.',
       status: 'COMPLETED',

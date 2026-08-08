@@ -1,14 +1,9 @@
 import { ConvexHttpClient } from 'convex/browser'
 import { api } from '../convex/_generated/api'
-import type { PortalData } from './data'
+import { initialData, type PortalData } from './data'
 
 const CONVEX_URL = import.meta.env.VITE_CONVEX_URL as string | undefined
-
-if (!CONVEX_URL) {
-  throw new Error('VITE_CONVEX_URL is not configured. Set it in frontend/.env.')
-}
-
-const client = new ConvexHttpClient(CONVEX_URL)
+const client = CONVEX_URL ? new ConvexHttpClient(CONVEX_URL) : null
 
 const createMutationByPath = {
   '/wards': api.portal.createWard,
@@ -25,7 +20,19 @@ function normalizeError(error: unknown) {
   return error instanceof Error ? error.message : 'The Convex request failed.'
 }
 
+function configuredClient() {
+  if (!client) {
+    throw new Error('VITE_CONVEX_URL is not configured. Set it in frontend/.env to enable data syncing.')
+  }
+
+  return client
+}
+
 export async function loadPortalData(): Promise<PortalData> {
+  if (!client) {
+    return initialData
+  }
+
   try {
     return (await client.query(api.portal.getPortalData, {})) as PortalData
   } catch (error) {
@@ -41,22 +48,22 @@ export async function createRecord<T>(path: string, payload: Record<string, unkn
   }
 
   try {
-    return (await client.mutation(mutationRef, payload as never)) as T
+    return (await configuredClient().mutation(mutationRef, payload as never)) as T
   } catch (error) {
     throw new Error(normalizeError(error))
   }
 }
 
 export async function markNotificationReadRequest(id: number) {
-  return client.mutation(api.portal.markNotificationRead, { id })
+  return configuredClient().mutation(api.portal.markNotificationRead, { id })
 }
 
 export async function markAllNotificationsReadRequest() {
-  return client.mutation(api.portal.markAllNotificationsRead, {})
+  return configuredClient().mutation(api.portal.markAllNotificationsRead, {})
 }
 
 export async function submitFeedback(payload: { name: string; email: string | null; message: string }) {
-  return client.mutation(api.portal.createFeedback, payload)
+  return configuredClient().mutation(api.portal.createFeedback, payload)
 }
 
 export type FeedbackEntryRecord = {
@@ -68,5 +75,9 @@ export type FeedbackEntryRecord = {
 }
 
 export async function loadFeedback(): Promise<FeedbackEntryRecord[]> {
+  if (!client) {
+    return []
+  }
+
   return (await client.query(api.portal.listFeedback, {})) as FeedbackEntryRecord[]
 }
